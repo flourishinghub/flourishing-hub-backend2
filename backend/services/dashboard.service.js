@@ -10,6 +10,605 @@ const eventCalendarItem = (event) => ({
   endAt: event.endAt
 });
 
+// STUDENT DASHBOARD API
+export const getStudentDashboardData = async (userId) => {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: { 
+      studentProfile: true 
+    }
+  });
+
+  if (!user?.studentProfile) {
+    throw new Error("Student profile not found");
+  }
+
+  const [registrations, moduleProgress, attendanceRecords, allEvents] = await Promise.all([
+    // Event Registrations
+    prisma.eventRegistration.findMany({
+      where: { userId },
+      include: {
+        event: {
+          include: {
+            modules: true
+          }
+        }
+      },
+      orderBy: { registeredAt: "desc" }
+    }),
+    
+    // Module Progress (Marks + Feedback)
+    prisma.moduleProgress.findMany({
+      where: {
+        studentProfile: {
+          userId
+        }
+      },
+      include: {
+        module: {
+          include: {
+            event: true
+          }
+        }
+      },
+      orderBy: { updatedAt: "desc" }
+    }),
+    
+    // Attendance Records
+    prisma.attendanceRecord.findMany({
+      where: { userId },
+      include: {
+        event: true,
+        module: true
+      },
+      orderBy: { markedAt: "desc" }
+    }),
+    
+    // All Events for Calendar
+    prisma.event.findMany({
+      where: {
+        status: "PUBLISHED"
+      },
+      include: {
+        registrations: {
+          where: { userId }
+        }
+      },
+      orderBy: { startAt: "asc" }
+    })
+  ]);
+
+  // Basic Info
+  const basicInfo = {
+    name: user.name,
+    rollNumber: user.studentProfile.rollNumber,
+    department: user.studentProfile.department,
+    yearOfStudy: user.studentProfile.yearOfStudy,
+    programme: user.studentProfile.programme
+  };
+
+  // Event Status
+  const registeredEvents = registrations.filter(r => r.status === "REGISTERED");
+  const completedEvents = registrations.filter(r => r.status === "ATTENDED");
+  const upcomingEvents = registeredEvents.filter(r => new Date(r.event.startAt) > new Date());
+
+  // Past Records (attended events)
+  const attendedEvents = registrations.filter(r => r.status === "ATTENDED");
+
+  // Marks + Feedback
+  const marksAndFeedback = moduleProgress.map(mp => ({
+    moduleTitle: mp.module.title,
+    eventTitle: mp.module.event.title,
+    marksObtained: mp.marksObtained,
+    maxMarks: mp.module.maxMarks,
+    completedAt: mp.completedAt
+  }));
+
+  // Calendar Data
+  const calendarData = allEvents.map(event => ({
+    ...eventCalendarItem(event),
+    isRegistered: event.registrations.length > 0
+  }));
+
+  return {
+    basicInfo,
+    eventStatus: {
+      registeredEvents: registeredEvents.length,
+      completedEvents: completedEvents.length,
+      upcomingEvents: upcomingEvents.length
+    },
+    pastRecords: attendedEvents,
+    marksAndFeedback,
+    calendarData
+  };
+};
+
+// INSTRUCTOR DASHBOARD API
+export const getInstructorDashboardData = async (userId) => {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: { 
+      instructorProfile: true 
+    }
+  });
+
+  if (!user?.instructorProfile) {
+    throw new Error("Instructor profile not found");
+  }
+
+  const [assignments, upcomingSessions, pastSessions, allEvents] = await Promise.all([
+    // Staff Assignments
+    prisma.eventStaffAssignment.findMany({
+      where: { 
+        userId,
+        role: "INSTRUCTOR"
+      },
+      include: {
+        event: {
+          include: {
+            modules: true
+          }
+        }
+      },
+      orderBy: { createdAt: "desc" }
+    }),
+    
+    // Upcoming Sessions
+    prisma.eventModule.findMany({
+      where: {
+        startAt: { gte: new Date() },
+        event: {
+          assignments: {
+            some: {
+              userId,
+              role: "INSTRUCTOR"
+            }
+          }
+        }
+      },
+      include: {
+        event: true
+      },
+      orderBy: { startAt: "asc" }
+    }),
+    
+    // Past Sessions
+    prisma.eventModule.findMany({
+      where: {
+        startAt: { lt: new Date() },
+        event: {
+          assignments: {
+            some: {
+              userId,
+              role: "INSTRUCTOR"
+            }
+          }
+        }
+      },
+      include: {
+        event: true
+      },
+      orderBy: { startAt: "desc" }
+    }),
+    
+    // All Events for Calendar
+    prisma.event.findMany({
+      where: {
+        assignments: {
+          some: {
+            userId,
+            role: "INSTRUCTOR"
+          }
+        }
+      },
+      include: {
+        modules: true
+      },
+      orderBy: { startAt: "asc" }
+    })
+  ]);
+
+  // Basic Info
+  const basicInfo = {
+    name: user.name,
+    designation: user.instructorProfile.designation,
+    department: user.instructorProfile.department
+  };
+
+  // Upcoming Sessions with venue, time, mode
+  const upcomingSessionsData = upcomingSessions.map(session => ({
+    id: session.id,
+    title: session.title,
+    eventTitle: session.event.title,
+    venue: session.venue || session.event.venue,
+    startAt: session.startAt,
+    endAt: session.endAt,
+    mode: session.meetLink ? "online" : "offline",
+    meetLink: session.meetLink
+  }));
+
+  // Past Sessions
+  const pastSessionsData = pastSessions.map(session => ({
+    id: session.id,
+    title: session.title,
+    eventTitle: session.event.title,
+    venue: session.venue || session.event.venue,
+    startAt: session.startAt,
+    endAt: session.endAt,
+    mode: session.meetLink ? "online" : "offline"
+  }));
+
+  // Calendar Data
+  const calendarData = allEvents.map(event => eventCalendarItem(event));
+
+  return {
+    basicInfo,
+    upcomingSessions: upcomingSessionsData,
+    pastSessions: pastSessionsData,
+    calendarData
+  };
+};
+
+// VOLUNTEER DASHBOARD API
+export const getVolunteerDashboardData = async (userId) => {
+  const user = await prisma.user.findUnique({
+    where: { id: userId }
+  });
+
+  const [allEvents, volunteerInterests, volunteerAssignments] = await Promise.all([
+    // All available events (for volunteering)
+    prisma.event.findMany({
+      where: {
+        status: "PUBLISHED",
+        startAt: { gte: new Date() }
+      },
+      orderBy: { startAt: "asc" },
+      take: 20
+    }),
+    
+    // Volunteer interest registrations (expressed interest)
+    prisma.eventAvailability.findMany({
+      where: { 
+        userId,
+        isAvailable: true
+      },
+      include: {
+        event: true
+      },
+      orderBy: { respondedAt: "desc" }
+    }),
+    
+    // Actual assignments (selected by admin)
+    prisma.eventStaffAssignment.findMany({
+      where: { 
+        userId,
+        role: "VOLUNTEER"
+      },
+      include: {
+        event: true
+      },
+      orderBy: { createdAt: "desc" }
+    })
+  ]);
+
+  // Separate assignments by status
+  const assignedDuties = volunteerAssignments.filter(a => 
+    new Date(a.event.startAt) > new Date()
+  );
+  
+  const completedDuties = volunteerAssignments.filter(a => 
+    new Date(a.event.endAt) < new Date()
+  );
+
+  // Get interested event IDs
+  const interestedEventIds = volunteerInterests.map(vi => vi.eventId);
+  const assignedEventIds = volunteerAssignments.map(va => va.eventId);
+
+  // Format available events
+  const availableEvents = allEvents.map(event => ({
+    id: event.id,
+    title: event.title,
+    startAt: event.startAt,
+    endAt: event.endAt,
+    venue: event.venue,
+    status: assignedEventIds.includes(event.id) 
+      ? 'ASSIGNED' 
+      : interestedEventIds.includes(event.id) 
+      ? 'INTERESTED' 
+      : 'AVAILABLE'
+  }));
+
+  // Format assigned duties (My Duties section)
+  const myDuties = assignedDuties.map(assignment => ({
+    eventId: assignment.eventId,
+    title: assignment.event.title,
+    date: assignment.event.startAt,
+    venue: assignment.event.venue,
+    role: assignment.role || 'VOLUNTEER',
+    status: 'ASSIGNED'
+  }));
+
+  // Format completed duties
+  const completedEvents = completedDuties.map(assignment => ({
+    eventId: assignment.eventId,
+    title: assignment.event.title,
+    date: assignment.event.startAt,
+    venue: assignment.event.venue,
+    role: assignment.role || 'VOLUNTEER',
+    marks: null,
+    maxMarks: null,
+    starRating: null
+  }));
+
+  return {
+    name: user.name,
+    rollNo: user.employeeId || 'N/A',
+    programme: 'Volunteer',
+    department: 'N/A',
+    year: 1,
+    batch: 'N/A',
+    sessionsVolunteered: volunteerAssignments.length,
+    completedDuties: completedDuties.length,
+    availableEvents: availableEvents,
+    myDuties: myDuties,
+    completedEvents: completedEvents,
+    interestedEventIds: interestedEventIds,
+    assignedEventIds: assignedEventIds
+  };
+};
+
+// ASSOCIATE INSTRUCTOR DASHBOARD API
+export const getAssociateDashboardData = async (userId) => {
+  const user = await prisma.user.findUnique({
+    where: { id: userId }
+  });
+
+  const [assignments, registrants, attendanceRecords, volunteerPool] = await Promise.all([
+    // Associate Instructor Assignments
+    prisma.eventStaffAssignment.findMany({
+      where: { 
+        userId,
+        role: "ASSOCIATE_INSTRUCTOR"
+      },
+      include: {
+        event: {
+          include: {
+            modules: true,
+            registrations: {
+              include: {
+                user: {
+                  include: {
+                    studentProfile: true
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      orderBy: { createdAt: "desc" }
+    }),
+    
+    // Event Registrations for assigned events
+    prisma.eventRegistration.findMany({
+      where: {
+        event: {
+          assignments: {
+            some: {
+              userId,
+              role: "ASSOCIATE_INSTRUCTOR"
+            }
+          }
+        }
+      },
+      include: {
+        user: {
+          include: {
+            studentProfile: true
+          }
+        },
+        event: true
+      },
+      orderBy: { registeredAt: "desc" }
+    }),
+    
+    // Attendance Records for assigned events
+    prisma.attendanceRecord.findMany({
+      where: {
+        event: {
+          assignments: {
+            some: {
+              userId,
+              role: "ASSOCIATE_INSTRUCTOR"
+            }
+          }
+        }
+      },
+      include: {
+        user: {
+          include: {
+            studentProfile: true
+          }
+        },
+        event: true,
+        module: true
+      },
+      orderBy: { markedAt: "desc" }
+    }),
+    
+    // Volunteer Pool (Event Availability)
+    prisma.eventAvailability.findMany({
+      where: {
+        isAvailable: true,
+        event: {
+          assignments: {
+            some: {
+              userId,
+              role: "ASSOCIATE_INSTRUCTOR"
+            }
+          }
+        }
+      },
+      include: {
+        user: true,
+        event: true
+      },
+      orderBy: { respondedAt: "desc" }
+    })
+  ]);
+
+  // Basic Info
+  const basicInfo = {
+    name: user.name,
+    email: user.email
+  };
+
+  // List of Registrants
+  const registrantsList = registrants.map(reg => ({
+    id: reg.id,
+    userName: reg.user.name,
+    userEmail: reg.user.email,
+    rollNumber: reg.user.studentProfile?.rollNumber,
+    department: reg.user.studentProfile?.department,
+    eventTitle: reg.event.title,
+    status: reg.status,
+    registeredAt: reg.registeredAt,
+    isVolunteer: reg.isVolunteer
+  }));
+
+  // Attendance Control Access
+  const attendanceControlAccess = attendanceRecords.map(record => ({
+    id: record.id,
+    userName: record.user.name,
+    rollNumber: record.user.studentProfile?.rollNumber,
+    eventTitle: record.event.title,
+    moduleTitle: record.module?.title,
+    status: record.status,
+    markedAt: record.markedAt,
+    canModify: true // Associate instructors can mark attendance
+  }));
+
+  // Volunteer Pool
+  const volunteerPoolData = volunteerPool.map(vol => ({
+    id: vol.id,
+    userName: vol.user.name,
+    userEmail: vol.user.email,
+    eventTitle: vol.event.title,
+    isAvailable: vol.isAvailable,
+    note: vol.note,
+    respondedAt: vol.respondedAt
+  }));
+
+  // Abilities
+  const abilities = {
+    canMarkAttendance: true,
+    canSelectVolunteers: true,
+    canActivateQuizFeedback: true // This would be a flag-only operation
+  };
+
+  return {
+    basicInfo,
+    registrants: registrantsList,
+    attendanceControlAccess,
+    volunteerPool: volunteerPoolData,
+    abilities
+  };
+};
+
+// ADMIN DASHBOARD API
+export const getAdminDashboardData = async () => {
+  try {
+    const [
+      totalUsers,
+      totalEvents,
+      totalRegistrations,
+      attendanceStats,
+      eventsByType,
+      usersByRole,
+      recentActivity
+    ] = await Promise.all([
+      // Total Users
+      prisma.user.count({
+        where: { isActive: true }
+      }),
+      
+      // Total Events
+      prisma.event.count(),
+      
+      // Total Registrations
+      prisma.eventRegistration.count(),
+      
+      // Attendance Stats
+      prisma.attendanceRecord.groupBy({
+        by: ["status"],
+        _count: {
+          _all: true
+        }
+      }),
+      
+      // Events by Type
+      prisma.event.groupBy({
+        by: ["type"],
+        _count: {
+          _all: true
+        }
+      }),
+      
+      // Users by Role
+      prisma.user.groupBy({
+        by: ["role"],
+        _count: {
+          _all: true
+        },
+        where: { isActive: true }
+      }),
+      
+      // Recent Activity (last 10 registrations)
+      prisma.eventRegistration.findMany({
+        take: 10,
+        include: {
+          user: {
+            include: {
+              studentProfile: true
+            }
+          },
+          event: true
+        },
+        orderBy: { registeredAt: "desc" }
+      })
+    ]);
+
+    const attendanceStatsFormatted = {
+      present: attendanceStats.find(stat => stat.status === "PRESENT")?._count._all || 0,
+      absent: attendanceStats.find(stat => stat.status === "ABSENT")?._count._all || 0,
+      excused: attendanceStats.find(stat => stat.status === "EXCUSED")?._count._all || 0
+    };
+
+    return {
+      totals: {
+        totalUsers,
+        totalEvents,
+        totalRegistrations
+      },
+      attendanceStats: attendanceStatsFormatted,
+      eventsByType,
+      usersByRole,
+      recentActivity: recentActivity.map(activity => ({
+        id: activity.id,
+        userName: activity.user.name,
+        rollNumber: activity.user.studentProfile?.rollNumber,
+        eventTitle: activity.event.title,
+        registeredAt: activity.registeredAt,
+        status: activity.status
+      }))
+    };
+  } catch (error) {
+    console.error('Error in getAdminDashboardData:', error);
+    throw error;
+  }
+};
+
+// LEGACY FUNCTIONS (keeping for backward compatibility)
 export const getStudentDashboard = async (userId) => {
   const [user, registrations, completedProgress, pendingModules, openEvents] = await Promise.all([
     prisma.user.findUnique({

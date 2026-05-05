@@ -3,9 +3,15 @@ import { StatusCodes } from "http-status-codes";
 import {
   getAdminDashboard,
   getStaffDashboard,
-  getStudentDashboard
+  getStudentDashboard,
+  getStudentDashboardData,
+  getInstructorDashboardData,
+  getVolunteerDashboardData,
+  getAssociateDashboardData,
+  getAdminDashboardData
 } from "../services/dashboard.service.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
+import { ApiError } from "../utils/ApiError.js";
 
 export const myDashboardController = asyncHandler(async (req, res) => {
   let data;
@@ -18,6 +24,63 @@ export const myDashboardController = asyncHandler(async (req, res) => {
     data = await getStudentDashboard(req.user.id);
   }
 
+  res.status(StatusCodes.OK).json({
+    success: true,
+    data
+  });
+});
+
+export const studentDashboardController = asyncHandler(async (req, res) => {
+  if (!req.user.studentProfile) {
+    throw new ApiError(StatusCodes.NOT_FOUND, "Student profile not found");
+  }
+
+  const data = await getStudentDashboardData(req.user.id);
+  
+  res.status(StatusCodes.OK).json({
+    success: true,
+    data
+  });
+});
+
+export const instructorDashboardController = asyncHandler(async (req, res) => {
+  if (!req.user.instructorProfile) {
+    throw new ApiError(StatusCodes.NOT_FOUND, "Instructor profile not found");
+  }
+
+  const data = await getInstructorDashboardData(req.user.id);
+  
+  res.status(StatusCodes.OK).json({
+    success: true,
+    data
+  });
+});
+
+export const volunteerDashboardController = asyncHandler(async (req, res) => {
+  const data = await getVolunteerDashboardData(req.user.id);
+  
+  res.status(StatusCodes.OK).json({
+    success: true,
+    data
+  });
+});
+
+export const associateDashboardController = asyncHandler(async (req, res) => {
+  const data = await getAssociateDashboardData(req.user.id);
+  
+  res.status(StatusCodes.OK).json({
+    success: true,
+    data
+  });
+});
+
+export const adminDashboardController = asyncHandler(async (req, res) => {
+  if (req.user.role !== 'ADMIN') {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Admin role required");
+  }
+
+  const data = await getAdminDashboardData();
+  
   res.status(StatusCodes.OK).json({
     success: true,
     data

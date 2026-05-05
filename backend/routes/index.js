@@ -8,6 +8,8 @@ import { importRoutes } from "./import.routes.js";
 import { operationRoutes } from "./operation.routes.js";
 import { registrationRoutes } from "./registration.routes.js";
 import { userRoutes } from "./user.routes.js";
+import { adminRoutes } from "./admin.routes.js";
+import { profileRoutes } from "./profile.routes.js";
 
 export const router = Router();
 
@@ -16,7 +18,9 @@ router.use("/users", userRoutes);
 router.use("/events", eventRoutes);
 router.use("/event-operations", operationRoutes);
 router.use("/registrations", registrationRoutes);
-router.use("/dashboards", dashboardRoutes);
+router.use("/profile", profileRoutes); // Profile management routes
+router.use("/", dashboardRoutes); // Mount dashboard routes at root level
+router.use("/admin", adminRoutes); // Admin management routes
 router.use("/imports", importRoutes);
 router.use("/frontend", frontendRoutes);
 

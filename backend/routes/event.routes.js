@@ -12,7 +12,12 @@ import {
   getEventController,
   getEventRecordController,
   listEventsController,
-  updateEventController
+  updateEventController,
+  expressVolunteerInterestController,
+  withdrawVolunteerInterestController,
+  getEventVolunteersController,
+  assignVolunteerController,
+  unassignVolunteerController
 } from "../controllers/event.controller.js";
 import { authenticate } from "../middleware/auth.js";
 import { authorize } from "../middleware/authorize.js";
@@ -46,7 +51,12 @@ eventRoutes.post(
 eventRoutes.get("/", validate(listEventSchema), cacheResponse("events", 30), listEventsController);
 eventRoutes.get("/:eventId/record", authenticate, authorize("ADMIN"), getEventRecordController);
 eventRoutes.get("/:eventId/export", authenticate, authorize("ADMIN"), exportEventDataController);
+eventRoutes.get("/:eventId/volunteers", authenticate, authorize("ADMIN"), getEventVolunteersController);
+eventRoutes.post("/:eventId/volunteers/:userId/assign", authenticate, authorize("ADMIN"), assignVolunteerController);
+eventRoutes.delete("/:eventId/volunteers/:userId/unassign", authenticate, authorize("ADMIN"), unassignVolunteerController);
 eventRoutes.get("/:eventId", getEventController);
+eventRoutes.post("/:eventId/volunteer", authenticate, expressVolunteerInterestController);
+eventRoutes.delete("/:eventId/volunteer/withdraw", authenticate, withdrawVolunteerInterestController);
 eventRoutes.post("/", authenticate, authorize("ADMIN"), validate(createEventSchema), createEventController);
 eventRoutes.patch(
   "/:eventId",

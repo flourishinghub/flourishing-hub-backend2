@@ -31,7 +31,7 @@ export const authenticate = asyncHandler(async (req, _res, next) => {
     req.user = user;
     req.frontendRole = typeof payload.frontendRole === "string" ? payload.frontendRole : undefined;
     next();
-  } catch {
+  } catch (error) {
     throw new ApiError(StatusCodes.UNAUTHORIZED, "Authentication required");
   }
 });
