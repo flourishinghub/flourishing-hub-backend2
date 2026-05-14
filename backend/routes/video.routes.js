@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { authenticate, authorize } from "../middleware/auth.js";
+import { authenticate } from "../middleware/auth.js";
 import {
   getVideosController,
   getVideoByIdController,
@@ -16,7 +16,7 @@ videoRoutes.get("/", authenticate, getVideosController);
 videoRoutes.get("/:videoId", authenticate, getVideoByIdController);
 videoRoutes.post("/:videoId/view", authenticate, incrementVideoViewController);
 
-// Admin only routes
-videoRoutes.post("/", authenticate, authorize(["ADMIN"]), createVideoController);
-videoRoutes.put("/:videoId", authenticate, authorize(["ADMIN"]), updateVideoController);
-videoRoutes.delete("/:videoId", authenticate, authorize(["ADMIN"]), deleteVideoController);
+// Admin only routes (role check done in controller)
+videoRoutes.post("/", authenticate, createVideoController);
+videoRoutes.put("/:videoId", authenticate, updateVideoController);
+videoRoutes.delete("/:videoId", authenticate, deleteVideoController);

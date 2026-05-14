@@ -44,6 +44,14 @@ export const incrementVideoViewController = asyncHandler(async (req, res) => {
 
 // Create video (admin only)
 export const createVideoController = asyncHandler(async (req, res) => {
+  // Check if user is admin
+  if (req.user.role !== "ADMIN") {
+    return res.status(StatusCodes.FORBIDDEN).json({
+      success: false,
+      message: "Only admins can create videos"
+    });
+  }
+
   const video = await createVideo(req.body);
 
   res.status(StatusCodes.CREATED).json({
@@ -55,6 +63,14 @@ export const createVideoController = asyncHandler(async (req, res) => {
 
 // Update video (admin only)
 export const updateVideoController = asyncHandler(async (req, res) => {
+  // Check if user is admin
+  if (req.user.role !== "ADMIN") {
+    return res.status(StatusCodes.FORBIDDEN).json({
+      success: false,
+      message: "Only admins can update videos"
+    });
+  }
+
   const { videoId } = req.params;
   const video = await updateVideo(videoId, req.body);
 
@@ -67,6 +83,14 @@ export const updateVideoController = asyncHandler(async (req, res) => {
 
 // Delete video (admin only)
 export const deleteVideoController = asyncHandler(async (req, res) => {
+  // Check if user is admin
+  if (req.user.role !== "ADMIN") {
+    return res.status(StatusCodes.FORBIDDEN).json({
+      success: false,
+      message: "Only admins can delete videos"
+    });
+  }
+
   const { videoId } = req.params;
   await deleteVideo(videoId);
 
