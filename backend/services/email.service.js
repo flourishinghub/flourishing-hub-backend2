@@ -1,4 +1,4 @@
-import nodemailer from "nodemailer";
+import * as nodemailer from "nodemailer";
 import { ApiError } from "../utils/ApiError.js";
 import { StatusCodes } from "http-status-codes";
 
