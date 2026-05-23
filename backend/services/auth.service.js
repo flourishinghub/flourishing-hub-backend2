@@ -108,8 +108,11 @@ export const register = async (payload) => {
       requiresOTP: true
     };
   } else {
-    // Non-IITB email: Notify admin for approval
-    // TODO: Send notification to admin (can be implemented later)
+    // Non-IITB email: Notify user about pending approval
+    const { sendPendingApprovalEmail } = await import("./email.service.js");
+    await sendPendingApprovalEmail(user.email, user.name).catch(err => 
+      console.error("Failed to send pending approval email:", err)
+    );
     
     return {
       userId: user.id,

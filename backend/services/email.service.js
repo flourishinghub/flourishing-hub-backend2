@@ -347,3 +347,73 @@ export const sendDeclineEmail = async (email, name, reason) => {
     return false;
   }
 };
+
+
+// Send pending approval notification email
+export const sendPendingApprovalEmail = async (email, name) => {
+  try {
+    const transporter = createTransporter();
+    
+    if (!transporter) {
+      console.log(`Pending approval email skipped for ${email} (email not configured)`);
+      return true;
+    }
+
+    const mailOptions = {
+      from: `"Flourishing Hub, IIT Bombay" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: "Registration Received - Approval Pending",
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9; }
+            .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+            .content { background: white; padding: 30px; border-radius: 0 0 10px 10px; }
+            .tagline { font-style: italic; color: white; margin-top: 10px; }
+            .info-box { background: #f0f7ff; border-left: 4px solid #667eea; padding: 15px; margin: 20px 0; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>⏳ Registration Received</h1>
+              <p>IIT Bombay</p>
+              <p class="tagline">Let's Thrive, Not Just Survive</p>
+            </div>
+            <div class="content">
+              <h2>Hello ${name},</h2>
+              <p>Thank you for registering with Flourishing Hub!</p>
+              
+              <div class="info-box">
+                <p><strong>📋 Your registration is currently under review by our admin team.</strong></p>
+              </div>
+              
+              <p>Here's what happens next:</p>
+              <ol>
+                <li>Our admin team will review your registration details</li>
+                <li>You will receive an email notification once your account is approved</li>
+                <li>After approval, you can login and access all features</li>
+              </ol>
+              
+              <p><strong>Timeline:</strong> This process typically takes 24-48 hours.</p>
+              
+              <p>If you have any questions, please contact the Flourishing Hub team at IIT Bombay.</p>
+              
+              <p>Best regards,<br>Flourishing Hub Team<br>IIT Bombay</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `
+    };
+
+    await transporter.sendMail(mailOptions);
+    return true;
+  } catch (error) {
+    console.error("Error sending pending approval email:", error);
+    return false;
+  }
+};
