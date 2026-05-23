@@ -11,7 +11,7 @@ const passwordRule = z
 export const registerSchema = z.object({
   body: z.object({
     name: z.string().min(2).max(120),
-    email: z.string().email().endsWith("@iitb.ac.in"),
+    email: z.string().email(), // Allow all emails - IITB gets OTP, non-IITB gets admin approval
     password: passwordRule,
     role: z.enum(["STUDENT", "INSTRUCTOR", "VOLUNTEER"]).default("STUDENT"),
     employeeId: z.string().min(3).max(40).optional(),
@@ -39,7 +39,7 @@ export const registerSchema = z.object({
 
 export const loginSchema = z.object({
   body: z.object({
-    email: z.string().email().endsWith("@iitb.ac.in"),
+    email: z.string().email(), // Allow all emails for login
     password: z.string().min(8)
   }),
   params: z.object({}).optional(),
