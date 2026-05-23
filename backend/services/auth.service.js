@@ -63,6 +63,9 @@ export const register = async (payload) => {
 
   const passwordHash = await bcrypt.hash(payload.password, 12);
 
+  // Check if email is IITB email
+  const isIITBEmail = payload.email.toLowerCase().endsWith('@iitb.ac.in');
+  
   const user = await prisma.user.create({
     data: {
       name: payload.name,
@@ -70,7 +73,8 @@ export const register = async (payload) => {
       passwordHash,
       role: payload.role,
       profileImageUrl: payload.profileImageUrl,
-      isVerified: false, // New users need to verify email
+      isVerified: isIITBEmail ? false : true, // IITB emails need OTP, others need admin approval
+      approvalStatus: isIITBEmail ? "APPROVED" : "PENDING_APPROVAL", // Non-IITB emails need admin approval
       studentProfile: payload.studentProfile
         ? {
             create: payload.studentProfile
@@ -91,17 +95,32 @@ export const register = async (payload) => {
     }
   });
 
-  // Send OTP email
-  await createAndSendOTP(user.id, user.email, user.name);
+  if (isIITBEmail) {
+    // IITB email: Send OTP for verification
+    await createAndSendOTP(user.id, user.email, user.name);
 
-  // Return user data without tokens (need to verify first)
-  return {
-    userId: user.id,
-    email: user.email,
-    name: user.name,
-    role: user.role,
-    isVerified: user.isVerified
-  };
+    return {
+      userId: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      isVerified: user.isVerified,
+      requiresOTP: true
+    };
+  } else {
+    // Non-IITB email: Notify admin for approval
+    // TODO: Send notification to admin (can be implemented later)
+    
+    return {
+      userId: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      approvalStatus: user.approvalStatus,
+      requiresApproval: true,
+      message: "Your account has been created and is pending admin approval. You will receive an email once approved."
+    };
+  }
 };
 
 export const login = async ({ email, password }) => {
@@ -124,7 +143,22 @@ export const login = async ({ email, password }) => {
     throw new ApiError(StatusCodes.UNAUTHORIZED, "Invalid credentials");
   }
 
-  // Check if email is verified
+  // Check approval status first
+  if (user.approvalStatus === "PENDING_APPROVAL") {
+    throw new ApiError(
+      StatusCodes.FORBIDDEN,
+      "Your account is pending admin approval. You will receive an email once approved."
+    );
+  }
+
+  if (user.approvalStatus === "DECLINED") {
+    throw new ApiError(
+      StatusCodes.FORBIDDEN,
+      "Your account registration has been declined by the admin."
+    );
+  }
+
+  // Check if email is verified (for IITB emails)
   if (user.isVerified === false) {
     throw new ApiError(
       StatusCodes.FORBIDDEN, 

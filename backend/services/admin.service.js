@@ -651,3 +651,58 @@ export const getEventDetailsForAdmin = async (eventId) => {
     attendees: event.attendances
   };
 };
+
+// GET PENDING APPROVAL USERS
+export const getPendingApprovalUsers = async () => {
+  const users = await prisma.user.findMany({
+    where: {
+      approvalStatus: "PENDING_APPROVAL"
+    },
+    include: {
+      studentProfile: true,
+      instructorProfile: true
+    },
+    orderBy: {
+      createdAt: "desc"
+    }
+  });
+
+  return users;
+};
+
+// APPROVE USER
+export const approveUser = async (userId) => {
+  const user = await prisma.user.update({
+    where: { id: userId },
+    data: {
+      approvalStatus: "APPROVED",
+      isVerified: true
+    }
+  });
+
+  // Send approval email
+  const { sendApprovalEmail } = await import("./email.service.js");
+  await sendApprovalEmail(user.email, user.name).catch(err => 
+    console.error("Failed to send approval email:", err)
+  );
+
+  return user;
+};
+
+// DECLINE USER
+export const declineUser = async (userId, reason) => {
+  const user = await prisma.user.update({
+    where: { id: userId },
+    data: {
+      approvalStatus: "DECLINED"
+    }
+  });
+
+  // Send decline email
+  const { sendDeclineEmail } = await import("./email.service.js");
+  await sendDeclineEmail(user.email, user.name, reason).catch(err => 
+    console.error("Failed to send decline email:", err)
+  );
+
+  return user;
+};

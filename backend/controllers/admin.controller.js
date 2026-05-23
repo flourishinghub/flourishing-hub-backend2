@@ -12,7 +12,10 @@ import {
   deleteEvent,
   removeStaffAssignment,
   getVolunteersWithActivity,
-  getEventDetailsForAdmin
+  getEventDetailsForAdmin,
+  getPendingApprovalUsers,
+  approveUser,
+  declineUser
 } from "../services/admin.service.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
@@ -250,5 +253,64 @@ export const getEventDetailsForAdminController = asyncHandler(async (req, res) =
   res.status(StatusCodes.OK).json({
     success: true,
     data: eventDetails
+  });
+});
+
+// Get pending approval users
+export const getPendingApprovalUsersController = asyncHandler(async (req, res) => {
+  // Check if user is admin
+  if (req.user.role !== "ADMIN") {
+    return res.status(StatusCodes.FORBIDDEN).json({
+      success: false,
+      message: "Only admins can view pending approvals"
+    });
+  }
+
+  const users = await getPendingApprovalUsers();
+
+  res.status(StatusCodes.OK).json({
+    success: true,
+    data: users
+  });
+});
+
+// Approve user
+export const approveUserController = asyncHandler(async (req, res) => {
+  // Check if user is admin
+  if (req.user.role !== "ADMIN") {
+    return res.status(StatusCodes.FORBIDDEN).json({
+      success: false,
+      message: "Only admins can approve users"
+    });
+  }
+
+  const { userId } = req.params;
+  const user = await approveUser(userId);
+
+  res.status(StatusCodes.OK).json({
+    success: true,
+    message: "User approved successfully",
+    data: user
+  });
+});
+
+// Decline user
+export const declineUserController = asyncHandler(async (req, res) => {
+  // Check if user is admin
+  if (req.user.role !== "ADMIN") {
+    return res.status(StatusCodes.FORBIDDEN).json({
+      success: false,
+      message: "Only admins can decline users"
+    });
+  }
+
+  const { userId } = req.params;
+  const { reason } = req.body;
+  const user = await declineUser(userId, reason);
+
+  res.status(StatusCodes.OK).json({
+    success: true,
+    message: "User declined successfully",
+    data: user
   });
 });

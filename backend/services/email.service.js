@@ -221,3 +221,129 @@ export const sendWelcomeEmail = async (email, name, role) => {
     return false;
   }
 };
+
+
+// Send approval email
+export const sendApprovalEmail = async (email, name) => {
+  try {
+    const transporter = createTransporter();
+    
+    if (!transporter) {
+      console.log(`Approval email skipped for ${email} (email not configured)`);
+      return true;
+    }
+
+    const mailOptions = {
+      from: `"Flourishing Hub, IIT Bombay" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: "Account Approved - Flourishing Hub",
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9; }
+            .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+            .content { background: white; padding: 30px; border-radius: 0 0 10px 10px; }
+            .button { display: inline-block; background: #667eea; color: white; padding: 12px 30px; text-decoration: none; border-radius: 8px; margin: 20px 0; }
+            .tagline { font-style: italic; color: white; margin-top: 10px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>🎉 Account Approved!</h1>
+              <p>IIT Bombay</p>
+              <p class="tagline">Let's Thrive, Not Just Survive</p>
+            </div>
+            <div class="content">
+              <h2>Hello ${name},</h2>
+              <p>Great news! Your Flourishing Hub account has been approved by the admin.</p>
+              
+              <p>You can now login and access all features:</p>
+              <ul>
+                <li>Upcoming workshops and events</li>
+                <li>Video library with valuable content</li>
+                <li>Your personalized dashboard</li>
+                <li>Community engagement opportunities</li>
+              </ul>
+              
+              <a href="${process.env.CLIENT_URL || 'https://flourishing-hub-frontend2.vercel.app'}/login" class="button">Login Now</a>
+              
+              <p>We're excited to have you on this journey of growth and well-being.</p>
+              
+              <p>Best regards,<br>Flourishing Hub Team<br>IIT Bombay</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `
+    };
+
+    await transporter.sendMail(mailOptions);
+    return true;
+  } catch (error) {
+    console.error("Error sending approval email:", error);
+    return false;
+  }
+};
+
+// Send decline email
+export const sendDeclineEmail = async (email, name, reason) => {
+  try {
+    const transporter = createTransporter();
+    
+    if (!transporter) {
+      console.log(`Decline email skipped for ${email} (email not configured)`);
+      return true;
+    }
+
+    const mailOptions = {
+      from: `"Flourishing Hub, IIT Bombay" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: "Account Registration Update - Flourishing Hub",
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9; }
+            .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+            .content { background: white; padding: 30px; border-radius: 0 0 10px 10px; }
+            .tagline { font-style: italic; color: white; margin-top: 10px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>Flourishing Hub</h1>
+              <p>IIT Bombay</p>
+              <p class="tagline">Let's Thrive, Not Just Survive</p>
+            </div>
+            <div class="content">
+              <h2>Hello ${name},</h2>
+              <p>Thank you for your interest in Flourishing Hub.</p>
+              
+              <p>After review, we regret to inform you that your account registration could not be approved at this time.</p>
+              
+              ${reason ? `<p><strong>Reason:</strong> ${reason}</p>` : ''}
+              
+              <p>If you believe this is an error or have questions, please contact the Flourishing Hub team at IIT Bombay.</p>
+              
+              <p>Best regards,<br>Flourishing Hub Team<br>IIT Bombay</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `
+    };
+
+    await transporter.sendMail(mailOptions);
+    return true;
+  } catch (error) {
+    console.error("Error sending decline email:", error);
+    return false;
+  }
+};

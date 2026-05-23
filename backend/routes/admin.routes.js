@@ -13,7 +13,10 @@ import {
   deleteEventController,
   removeStaffAssignmentController,
   getVolunteersController,
-  getEventDetailsForAdminController
+  getEventDetailsForAdminController,
+  getPendingApprovalUsersController,
+  approveUserController,
+  declineUserController
 } from "../controllers/admin.controller.js";
 import { authenticate } from "../middleware/auth.js";
 
@@ -39,3 +42,9 @@ adminRoutes.get("/members", authenticate, getMemberDirectoryController);
 
 // Volunteers Management
 adminRoutes.get("/volunteers", authenticate, getVolunteersController);
+
+
+// User Approval Management
+adminRoutes.get("/pending-approvals", authenticate, getPendingApprovalUsersController);
+adminRoutes.post("/users/:userId/approve", authenticate, approveUserController);
+adminRoutes.post("/users/:userId/decline", authenticate, declineUserController);
