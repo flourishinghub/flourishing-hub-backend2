@@ -4,6 +4,12 @@ import { StatusCodes } from "http-status-codes";
 
 // Create transporter
 const createTransporter = () => {
+  // Check if email credentials are configured
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
+    console.warn("Email credentials not configured. Email sending will be skipped.");
+    return null;
+  }
+  
   return nodemailer.createTransporter({
     service: "gmail",
     auth: {
@@ -22,6 +28,16 @@ export const generateOTP = () => {
 export const sendOTPEmail = async (email, name, otp) => {
   try {
     const transporter = createTransporter();
+    
+    // If email is not configured, log OTP to console (development mode)
+    if (!transporter) {
+      console.log(`\n========== OTP FOR ${email} ==========`);
+      console.log(`Name: ${name}`);
+      console.log(`OTP: ${otp}`);
+      console.log(`Valid for: 10 minutes`);
+      console.log(`==========================================\n`);
+      return true;
+    }
 
     const mailOptions = {
       from: `"Flourishing Hub, IIT Bombay" <${process.env.EMAIL_USER}>`,
@@ -122,6 +138,12 @@ export const sendOTPEmail = async (email, name, otp) => {
 export const sendWelcomeEmail = async (email, name, role) => {
   try {
     const transporter = createTransporter();
+    
+    // If email is not configured, skip welcome email
+    if (!transporter) {
+      console.log(`Welcome email skipped for ${email} (email not configured)`);
+      return true;
+    }
 
     const mailOptions = {
       from: `"Flourishing Hub, IIT Bombay" <${process.env.EMAIL_USER}>`,

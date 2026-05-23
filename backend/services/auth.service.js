@@ -124,7 +124,7 @@ export const login = async ({ email, password }) => {
     throw new ApiError(StatusCodes.UNAUTHORIZED, "Invalid credentials");
   }
 
-  // Check if email is verified (skip for existing users who don't have isVerified field set)
+  // Check if email is verified
   if (user.isVerified === false) {
     throw new ApiError(
       StatusCodes.FORBIDDEN, 
