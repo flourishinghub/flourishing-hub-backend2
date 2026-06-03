@@ -357,6 +357,7 @@ export const getAllEventsWithRegistrations = async (filters = {}) => {
 
   return events.map(event => ({
     ...event,
+    attendedCount: event._count.attendances,
     registrations: event.registrations.map(reg => ({
       id: reg.id,
       registeredAt: reg.registeredAt,
@@ -376,6 +377,7 @@ export const getAllEventsWithRegistrations = async (filters = {}) => {
     })),
     registrationStats: {
       total: event._count.registrations,
+      attended: event._count.attendances,
       students: event.registrations.filter(r => r.user.role === 'STUDENT').length,
       volunteers: event.registrations.filter(r => r.isVolunteer).length,
       fillRate: event.capacity > 0 ? Math.round((event._count.registrations / event.capacity) * 100) : 0,
