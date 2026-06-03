@@ -225,55 +225,9 @@ export const createSelfCheckIn = async (eventId, payload, actor) => {
       moduleId: payload.moduleId,
       userId: actor.id,
       note: payload.note,
-      status: "VERIFIED"
+      status: "PENDING"
     }
   });
-
-  const existingAttendance = await prisma.attendanceRecord.findFirst({
-    where: {
-      eventId,
-      userId: actor.id,
-      moduleId: payload.moduleId || null
-    },
-    orderBy: {
-      markedAt: "desc"
-    }
-  });
-
-  const attendanceData = {
-    eventId,
-    moduleId: payload.moduleId,
-    userId: actor.id,
-    status: "PRESENT",
-    source: "SELF_CHECK_IN",
-    markedAt: checkIn.checkedInAt
-  };
-
-  if (existingAttendance) {
-    await prisma.attendanceRecord.update({
-      where: { id: existingAttendance.id },
-      data: attendanceData
-    });
-  } else {
-    await prisma.attendanceRecord.create({
-      data: attendanceData
-    });
-  }
-
-  if (registration) {
-    await prisma.eventRegistration.update({
-      where: {
-        eventId_userId: {
-          eventId,
-          userId: actor.id
-        }
-      },
-      data: {
-        checkedInAt: checkIn.checkedInAt,
-        status: "ATTENDED"
-      }
-    });
-  }
 
   return checkIn;
 };
@@ -377,6 +331,52 @@ export const updateModuleProgress = async (moduleId, payload, actor) => {
       completedAt: payload.completedAt ? new Date(payload.completedAt) : undefined
     }
   });
+};
+
+export const getEventCheckIns = async (eventId, actor) => {
+  const isAllowed =
+    actor.role === "ADMIN" ||
+    (await prisma.eventStaffAssignment.findFirst({
+      where: { eventId, userId: actor.id, role: { in: ["INSTRUCTOR", "ASSOCIATE_INSTRUCTOR"] } }
+    }));
+
+  if (!isAllowed) {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Only assigned staff can view check-ins");
+  }
+
+  return prisma.eventCheckIn.findMany({
+    where: { eventId },
+    include: {
+      user: {
+        include: { studentProfile: true }
+      }
+    },
+    orderBy: { checkedInAt: "asc" }
+  });
+};
+
+export const verifyAllCheckIns = async (eventId, actor) => {
+  const isAllowed =
+    actor.role === "ADMIN" ||
+    (await prisma.eventStaffAssignment.findFirst({
+      where: { eventId, userId: actor.id, role: { in: ["INSTRUCTOR", "ASSOCIATE_INSTRUCTOR"] } }
+    }));
+
+  if (!isAllowed) {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Only assigned staff can verify check-ins");
+  }
+
+  const pending = await prisma.eventCheckIn.findMany({
+    where: { eventId, status: "PENDING" }
+  });
+
+  await Promise.all(
+    pending.map((checkIn) =>
+      reviewCheckIn(checkIn.id, { status: "VERIFIED", note: "Bulk verified" }, actor)
+    )
+  );
+
+  return { verifiedCount: pending.length };
 };
 
 export const getMyAttendance = async (userId) => {

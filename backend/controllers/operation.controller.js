@@ -8,7 +8,9 @@ import {
   submitFeedback,
   updateAvailability,
   updateModuleProgress,
-  getMyAttendance
+  getMyAttendance,
+  getEventCheckIns,
+  verifyAllCheckIns
 } from "../services/operation.service.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 
@@ -77,8 +79,15 @@ export const updateModuleProgressController = asyncHandler(async (req, res) => {
 
 export const getMyAttendanceController = asyncHandler(async (req, res) => {
   const data = await getMyAttendance(req.user.id);
-  res.status(StatusCodes.OK).json({
-    success: true,
-    data
-  });
+  res.status(StatusCodes.OK).json({ success: true, data });
+});
+
+export const getEventCheckInsController = asyncHandler(async (req, res) => {
+  const data = await getEventCheckIns(req.params.eventId, req.user);
+  res.status(StatusCodes.OK).json({ success: true, data });
+});
+
+export const verifyAllCheckInsController = asyncHandler(async (req, res) => {
+  const data = await verifyAllCheckIns(req.params.eventId, req.user);
+  res.status(StatusCodes.OK).json({ success: true, message: "All pending check-ins verified", data });
 });
