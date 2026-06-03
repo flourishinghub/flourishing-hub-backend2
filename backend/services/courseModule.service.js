@@ -76,7 +76,10 @@ export const deleteModule = async (id) => {
   if (!existing) {
     throw new ApiError(StatusCodes.NOT_FOUND, "Module not found");
   }
-  await prisma.courseModule.delete({ where: { id } });
+  await prisma.$transaction([
+    prisma.event.deleteMany({ where: { courseModuleId: id } }),
+    prisma.courseModule.delete({ where: { id } }),
+  ]);
   return { message: "Module deleted successfully" };
 };
 
