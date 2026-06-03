@@ -379,3 +379,44 @@ export const updateModuleProgress = async (moduleId, payload, actor) => {
   });
 };
 
+export const getMyAttendance = async (userId) => {
+  const [registrations, attendanceRecords, verifiedCheckIns] = await Promise.all([
+    prisma.eventRegistration.findMany({
+      where: {
+        userId,
+        event: { endAt: { lt: new Date() } }
+      },
+      include: {
+        event: {
+          include: {
+            course: { select: { id: true, name: true } }
+          }
+        }
+      },
+      orderBy: { registeredAt: "desc" }
+    }),
+    prisma.attendanceRecord.findMany({ where: { userId } }),
+    prisma.eventCheckIn.findMany({ where: { userId, status: "VERIFIED" } })
+  ]);
+
+  return registrations.map((reg) => {
+    const attendance = attendanceRecords.find((a) => a.eventId === reg.eventId);
+    const hasVerifiedCheckIn = verifiedCheckIns.some((c) => c.eventId === reg.eventId);
+
+    let status = "ABSENT";
+    if (attendance?.status === "PRESENT" || hasVerifiedCheckIn) {
+      status = "PRESENT";
+    } else if (attendance?.status === "EXCUSED") {
+      status = "EXCUSED";
+    }
+
+    return {
+      eventId: reg.eventId,
+      eventTitle: reg.event.title,
+      courseName: reg.event.course?.name || null,
+      date: reg.event.startAt,
+      status
+    };
+  });
+};
+

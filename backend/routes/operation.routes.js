@@ -7,7 +7,8 @@ import {
   selfCheckInController,
   submitFeedbackController,
   updateAvailabilityController,
-  updateModuleProgressController
+  updateModuleProgressController,
+  getMyAttendanceController
 } from "../controllers/operation.controller.js";
 import { authenticate } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
@@ -24,6 +25,7 @@ import {
 export const operationRoutes = Router();
 
 operationRoutes.use(authenticate);
+operationRoutes.get("/attendance/me", getMyAttendanceController);
 operationRoutes.post("/:eventId/assignments", validate(assignmentSchema), assignEventStaffController);
 operationRoutes.post("/:eventId/attendance", validate(attendanceSchema), markAttendanceController);
 operationRoutes.post("/:eventId/availability", validate(availabilitySchema), updateAvailabilityController);

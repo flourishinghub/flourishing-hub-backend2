@@ -7,7 +7,8 @@ import {
   reviewCheckIn,
   submitFeedback,
   updateAvailability,
-  updateModuleProgress
+  updateModuleProgress,
+  getMyAttendance
 } from "../services/operation.service.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 
@@ -70,6 +71,14 @@ export const updateModuleProgressController = asyncHandler(async (req, res) => {
   res.status(StatusCodes.OK).json({
     success: true,
     message: "Quiz score / module progress updated successfully",
+    data
+  });
+});
+
+export const getMyAttendanceController = asyncHandler(async (req, res) => {
+  const data = await getMyAttendance(req.user.id);
+  res.status(StatusCodes.OK).json({
+    success: true,
     data
   });
 });
