@@ -344,6 +344,10 @@ export const getAllEventsWithRegistrations = async (filters = {}) => {
           registeredAt: 'desc'
         }
       },
+      assignments: {
+        where: { role: { in: ["INSTRUCTOR", "ASSOCIATE_INSTRUCTOR"] } },
+        include: { user: { select: { id: true, name: true, role: true } } }
+      },
       _count: {
         select: {
           registrations: true,

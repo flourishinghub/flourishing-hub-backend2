@@ -85,7 +85,7 @@ export const createEvent = async (payload, createdById) => {
   const startAt = new Date(payload.startAt);
   const templateModules = await resolveTemplateModules(payload);
 
-  return prisma.event.create({
+  const event = await prisma.event.create({
     data: {
       title: payload.title,
       slug,
@@ -114,15 +114,29 @@ export const createEvent = async (payload, createdById) => {
     },
     include: {
       modules: true,
-      createdBy: {
-        select: {
-          id: true,
-          name: true,
-          email: true
-        }
-      }
+      createdBy: { select: { id: true, name: true, email: true } }
     }
   });
+
+  // Create staff assignments for instructor and associate instructor
+  const staffToAssign = [
+    payload.instructorId && { userId: payload.instructorId, role: "INSTRUCTOR" },
+    payload.associateInstructorId && { userId: payload.associateInstructorId, role: "ASSOCIATE_INSTRUCTOR" },
+  ].filter(Boolean);
+
+  if (staffToAssign.length) {
+    await prisma.eventStaffAssignment.createMany({
+      data: staffToAssign.map((s) => ({
+        eventId: event.id,
+        userId: s.userId,
+        role: s.role,
+        assignedById: createdById,
+      })),
+      skipDuplicates: true,
+    });
+  }
+
+  return event;
 };
 
 export const listEvents = async (query) => {
@@ -194,7 +208,7 @@ export const updateEvent = async (eventId, payload) => {
       }
     : undefined;
 
-  return prisma.event.update({
+  const updatedEvent = await prisma.event.update({
     where: { id: eventId },
     data: {
       ...(payload.title ? { title: payload.title, slug: `${slugify(payload.title)}-${Date.now()}` } : {}),
@@ -222,10 +236,39 @@ export const updateEvent = async (eventId, payload) => {
       ...(payload.templateId !== undefined ? { templateId: payload.templateId } : {}),
       ...(moduleData ? { modules: moduleData } : {})
     },
-    include: {
-      modules: true
-    }
+    include: { modules: true }
   });
+
+  // Update staff assignments if instructorId / associateInstructorId provided
+  const rolesToUpdate = [
+    payload.instructorId !== undefined && "INSTRUCTOR",
+    payload.associateInstructorId !== undefined && "ASSOCIATE_INSTRUCTOR",
+  ].filter(Boolean);
+
+  if (rolesToUpdate.length) {
+    await prisma.eventStaffAssignment.deleteMany({
+      where: { eventId, role: { in: rolesToUpdate } },
+    });
+
+    const newAssignments = [
+      payload.instructorId && { userId: payload.instructorId, role: "INSTRUCTOR" },
+      payload.associateInstructorId && { userId: payload.associateInstructorId, role: "ASSOCIATE_INSTRUCTOR" },
+    ].filter((a) => a && a.userId);
+
+    if (newAssignments.length) {
+      await prisma.eventStaffAssignment.createMany({
+        data: newAssignments.map((a) => ({
+          eventId,
+          userId: a.userId,
+          role: a.role,
+          assignedById: existingEvent.createdById,
+        })),
+        skipDuplicates: true,
+      });
+    }
+  }
+
+  return updatedEvent;
 };
 
 export const deleteEvent = async (eventId) => {
