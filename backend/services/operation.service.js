@@ -420,3 +420,34 @@ export const getMyAttendance = async (userId) => {
   });
 };
 
+export const getMyAssignedEvents = async (actor) => {
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
+  const assignments = await prisma.eventStaffAssignment.findMany({
+    where: {
+      userId: actor.id,
+      role: "ASSOCIATE_INSTRUCTOR",
+      event: {
+        status: "PUBLISHED",
+        startAt: { gte: todayStart }
+      }
+    },
+    include: {
+      event: {
+        include: {
+          modules: { orderBy: { startAt: "asc" } },
+          course: { select: { id: true, name: true } },
+          _count: { select: { registrations: true, checkIns: true } }
+        }
+      }
+    },
+    orderBy: { event: { startAt: "asc" } }
+  });
+
+  return assignments.map((a) => ({
+    ...a.event,
+    pendingCheckIns: a.event._count.checkIns
+  }));
+};
+

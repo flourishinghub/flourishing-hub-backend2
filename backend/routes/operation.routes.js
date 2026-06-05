@@ -10,7 +10,8 @@ import {
   updateModuleProgressController,
   getMyAttendanceController,
   getEventCheckInsController,
-  verifyAllCheckInsController
+  verifyAllCheckInsController,
+  getMyAssignedEventsController
 } from "../controllers/operation.controller.js";
 import { authenticate } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
@@ -28,6 +29,7 @@ export const operationRoutes = Router();
 
 operationRoutes.use(authenticate);
 operationRoutes.get("/attendance/me", getMyAttendanceController);
+operationRoutes.get("/my-assigned-events", getMyAssignedEventsController);
 operationRoutes.get("/:eventId/check-ins", getEventCheckInsController);
 operationRoutes.post("/:eventId/check-ins/verify-all", verifyAllCheckInsController);
 operationRoutes.post("/:eventId/assignments", validate(assignmentSchema), assignEventStaffController);
