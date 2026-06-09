@@ -420,6 +420,73 @@ export const getMyAttendance = async (userId) => {
   });
 };
 
+export const getEventRegistrants = async (eventId, actor) => {
+  const isAllowed =
+    actor.role === "ADMIN" ||
+    (await prisma.eventStaffAssignment.findFirst({
+      where: { eventId, userId: actor.id, role: { in: ["INSTRUCTOR", "ASSOCIATE_INSTRUCTOR"] } }
+    }));
+
+  if (!isAllowed) {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Only assigned staff can view registrants");
+  }
+
+  return prisma.eventRegistration.findMany({
+    where: { eventId },
+    include: {
+      user: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          studentProfile: {
+            select: {
+              rollNumber: true,
+              department: true,
+              yearOfStudy: true,
+              programme: true
+            }
+          }
+        }
+      }
+    },
+    orderBy: { registeredAt: "asc" }
+  });
+};
+
+export const getEventAssignedVolunteers = async (eventId, actor) => {
+  const isAllowed =
+    actor.role === "ADMIN" ||
+    (await prisma.eventStaffAssignment.findFirst({
+      where: { eventId, userId: actor.id, role: { in: ["INSTRUCTOR", "ASSOCIATE_INSTRUCTOR"] } }
+    }));
+
+  if (!isAllowed) {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Only assigned staff can view volunteers");
+  }
+
+  return prisma.eventStaffAssignment.findMany({
+    where: { eventId, role: "VOLUNTEER" },
+    include: {
+      user: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          studentProfile: {
+            select: {
+              rollNumber: true,
+              department: true,
+              yearOfStudy: true,
+              programme: true
+            }
+          }
+        }
+      }
+    }
+  });
+};
+
 export const getMyAssignedEvents = async (actor) => {
   // Show events from the last 30 days onwards so past/ongoing events are still accessible
   const thirtyDaysAgo = new Date();

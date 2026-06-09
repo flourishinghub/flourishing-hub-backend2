@@ -11,7 +11,9 @@ import {
   getMyAttendance,
   getEventCheckIns,
   verifyAllCheckIns,
-  getMyAssignedEvents
+  getMyAssignedEvents,
+  getEventRegistrants,
+  getEventAssignedVolunteers
 } from "../services/operation.service.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 
@@ -95,5 +97,15 @@ export const verifyAllCheckInsController = asyncHandler(async (req, res) => {
 
 export const getMyAssignedEventsController = asyncHandler(async (req, res) => {
   const data = await getMyAssignedEvents(req.user);
+  res.status(StatusCodes.OK).json({ success: true, data });
+});
+
+export const getEventRegistrantsController = asyncHandler(async (req, res) => {
+  const data = await getEventRegistrants(req.params.eventId, req.user);
+  res.status(StatusCodes.OK).json({ success: true, data });
+});
+
+export const getEventAssignedVolunteersController = asyncHandler(async (req, res) => {
+  const data = await getEventAssignedVolunteers(req.params.eventId, req.user);
   res.status(StatusCodes.OK).json({ success: true, data });
 });
