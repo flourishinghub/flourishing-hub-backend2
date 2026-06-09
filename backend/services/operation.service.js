@@ -2,6 +2,7 @@ import { StatusCodes } from "http-status-codes";
 
 import { prisma } from "../database/prisma.js";
 import { ApiError } from "../utils/ApiError.js";
+import { createNotification } from "./notification.service.js";
 
 const getIstDateLabel = (value) =>
   new Date(value).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" });
@@ -263,6 +264,22 @@ export const reviewCheckIn = async (checkInId, payload, actor) => {
       },
       actor
     );
+    // Notify the student their attendance is verified
+    createNotification(
+      checkIn.userId,
+      "success",
+      "Attendance Verified",
+      "Your attendance has been verified by the instructor."
+    ).catch(() => {});
+  }
+
+  if (payload.status === "REJECTED") {
+    createNotification(
+      checkIn.userId,
+      "warning",
+      "Attendance Not Verified",
+      "Your check-in was not verified. Please contact your instructor."
+    ).catch(() => {});
   }
 
   return checkIn;
@@ -417,6 +434,13 @@ export const getMyAttendance = async (userId) => {
       date: reg.event.startAt,
       status
     };
+  });
+};
+
+export const getMyCheckIn = async (eventId, actor) => {
+  return prisma.eventCheckIn.findFirst({
+    where: { eventId, userId: actor.id },
+    orderBy: { checkedInAt: "desc" }
   });
 };
 

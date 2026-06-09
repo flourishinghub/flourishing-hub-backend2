@@ -3,6 +3,7 @@ import { StatusCodes } from "http-status-codes";
 import { prisma } from "../database/prisma.js";
 import { ApiError } from "../utils/ApiError.js";
 import { sendRegistrationConfirmationEmail } from "./email.service.js";
+import { createNotification } from "./notification.service.js";
 
 export const registerForEvent = async ({ eventId, asVolunteer }, user) => {
   const event = await prisma.event.findUnique({
@@ -73,6 +74,16 @@ export const registerForEvent = async ({ eventId, asVolunteer }, user) => {
 
   // Send confirmation email (non-blocking)
   sendRegistrationConfirmationEmail(user.email, user.name, event.title, event.startAt, event.venue).catch(() => {});
+
+  // In-app notification
+  const dateStr = new Date(event.startAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  createNotification(
+    user.id,
+    "info",
+    `Registered: ${event.title}`,
+    `You've successfully registered for "${event.title}" on ${dateStr}.`,
+    eventId
+  ).catch(() => {});
 
   return registration;
 };
