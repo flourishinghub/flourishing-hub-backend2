@@ -70,7 +70,7 @@ const users = [
   {
     email: "associate.instructor@iitb.ac.in",
     name: "Rohan Associate",
-    role: "INSTRUCTOR",
+    role: "ASSOCIATE_INSTRUCTOR",
     instructorProfile: {
       designation: "Associate Facilitator",
       department: "Humanities and Social Sciences"

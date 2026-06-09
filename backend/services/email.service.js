@@ -349,6 +349,108 @@ export const sendDeclineEmail = async (email, name, reason) => {
 };
 
 
+// Send registration confirmation email
+export const sendRegistrationConfirmationEmail = async (email, name, eventTitle, eventDate, eventVenue) => {
+  try {
+    const transporter = createTransporter();
+    if (!transporter) {
+      console.log(`Registration email skipped for ${email} (email not configured)`);
+      return true;
+    }
+    const formattedDate = new Date(eventDate).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
+    const mailOptions = {
+      from: `"Flourishing Hub, IIT Bombay" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: `Registration Confirmed: ${eventTitle}`,
+      html: `
+        <!DOCTYPE html><html><head><style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9; }
+          .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+          .content { background: white; padding: 30px; border-radius: 0 0 10px 10px; }
+          .event-box { background: #f0f7ff; border-left: 4px solid #667eea; padding: 15px; margin: 20px 0; border-radius: 0 8px 8px 0; }
+          .tagline { font-style: italic; color: white; margin-top: 10px; }
+        </style></head><body>
+          <div class="container">
+            <div class="header">
+              <h1>✅ Registration Confirmed!</h1>
+              <p>IIT Bombay</p>
+              <p class="tagline">Let's Thrive, Not Just Survive</p>
+            </div>
+            <div class="content">
+              <h2>Hello ${name},</h2>
+              <p>You have successfully registered for the following workshop:</p>
+              <div class="event-box">
+                <p><strong>📚 Workshop:</strong> ${eventTitle}</p>
+                <p><strong>📅 Date & Time:</strong> ${formattedDate} IST</p>
+                <p><strong>📍 Venue:</strong> ${eventVenue || 'TBD'}</p>
+              </div>
+              <p>Please arrive on time. You will need to check in on the website when the session goes live.</p>
+              <p>Best regards,<br>Flourishing Hub Team<br>IIT Bombay</p>
+            </div>
+          </div>
+        </body></html>
+      `
+    };
+    await transporter.sendMail(mailOptions);
+    return true;
+  } catch (error) {
+    console.error("Error sending registration email:", error);
+    return false;
+  }
+};
+
+// Send reminder email (24h before event)
+export const sendReminderEmail = async (email, name, eventTitle, eventDate, eventVenue) => {
+  try {
+    const transporter = createTransporter();
+    if (!transporter) {
+      console.log(`Reminder email skipped for ${email} (email not configured)`);
+      return true;
+    }
+    const formattedDate = new Date(eventDate).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
+    const mailOptions = {
+      from: `"Flourishing Hub, IIT Bombay" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: `Reminder: ${eventTitle} is Tomorrow!`,
+      html: `
+        <!DOCTYPE html><html><head><style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9; }
+          .header { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+          .content { background: white; padding: 30px; border-radius: 0 0 10px 10px; }
+          .event-box { background: #fffbeb; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0; border-radius: 0 8px 8px 0; }
+          .tagline { font-style: italic; color: white; margin-top: 10px; }
+        </style></head><body>
+          <div class="container">
+            <div class="header">
+              <h1>⏰ Workshop Reminder</h1>
+              <p>IIT Bombay</p>
+              <p class="tagline">Let's Thrive, Not Just Survive</p>
+            </div>
+            <div class="content">
+              <h2>Hello ${name},</h2>
+              <p>This is a friendly reminder that you have a workshop <strong>tomorrow</strong>:</p>
+              <div class="event-box">
+                <p><strong>📚 Workshop:</strong> ${eventTitle}</p>
+                <p><strong>📅 Date & Time:</strong> ${formattedDate} IST</p>
+                <p><strong>📍 Venue:</strong> ${eventVenue || 'TBD'}</p>
+              </div>
+              <p>Remember to check in on the Flourishing Hub website when the session goes live.</p>
+              <p>Best regards,<br>Flourishing Hub Team<br>IIT Bombay</p>
+            </div>
+          </div>
+        </body></html>
+      `
+    };
+    await transporter.sendMail(mailOptions);
+    return true;
+  } catch (error) {
+    console.error("Error sending reminder email:", error);
+    return false;
+  }
+};
+
 // Send pending approval notification email
 export const sendPendingApprovalEmail = async (email, name) => {
   try {

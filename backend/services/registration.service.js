@@ -2,6 +2,7 @@ import { StatusCodes } from "http-status-codes";
 
 import { prisma } from "../database/prisma.js";
 import { ApiError } from "../utils/ApiError.js";
+import { sendRegistrationConfirmationEmail } from "./email.service.js";
 
 export const registerForEvent = async ({ eventId, asVolunteer }, user) => {
   const event = await prisma.event.findUnique({
@@ -62,13 +63,18 @@ export const registerForEvent = async ({ eventId, asVolunteer }, user) => {
     throw new ApiError(StatusCodes.CONFLICT, "User is already registered for this event");
   }
 
-  return prisma.eventRegistration.create({
+  const registration = await prisma.eventRegistration.create({
     data: {
       eventId,
       userId: user.id,
       isVolunteer: Boolean(asVolunteer)
     }
   });
+
+  // Send confirmation email (non-blocking)
+  sendRegistrationConfirmationEmail(user.email, user.name, event.title, event.startAt, event.venue).catch(() => {});
+
+  return registration;
 };
 
 export const listMyRegistrations = async (userId) =>

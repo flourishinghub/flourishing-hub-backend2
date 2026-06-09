@@ -1,6 +1,7 @@
 import { app } from "./app.js";
 import { env } from "./config/index.js";
 import { prisma } from "./database/prisma.js";
+import { startReminderCron } from "./cron/reminder.cron.js";
 
 let server;
 
@@ -29,6 +30,8 @@ const start = async () => {
     server = app.listen(env.PORT, () => {
       console.log(`${env.APP_NAME} listening on port ${env.PORT}`);
     });
+
+    startReminderCron();
 
     server.on("error", async (error) => {
       if (error.code === "EADDRINUSE") {

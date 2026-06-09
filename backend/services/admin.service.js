@@ -485,6 +485,70 @@ export const getEventAnalytics = async (filters = {}) => {
   };
 };
 
+// WORKSHOP ANALYTICS TABLE (past workshops with full details)
+export const getWorkshopAnalyticsTable = async () => {
+  const events = await prisma.event.findMany({
+    where: { status: "COMPLETED" },
+    include: {
+      course: { select: { id: true, name: true } },
+      courseModule: { select: { id: true, title: true } },
+      assignments: {
+        where: { role: "INSTRUCTOR" },
+        include: { user: { select: { id: true, name: true } } },
+        take: 1
+      },
+      registrations: {
+        select: { id: true, status: true, userId: true, user: { select: { name: true, email: true, studentProfile: { select: { rollNumber: true } } } } }
+      },
+      attendances: {
+        select: { id: true, status: true, userId: true, user: { select: { name: true, email: true, studentProfile: { select: { rollNumber: true } } } } }
+      },
+      feedbackEntries: { select: { eventRating: true, instructorRating: true } }
+    },
+    orderBy: { startAt: "desc" }
+  });
+
+  return events.map(event => {
+    const totalRegistered = event.registrations.length;
+    const present = event.attendances.filter(a => a.status === "PRESENT");
+    const absent = event.attendances.filter(a => a.status === "ABSENT");
+    const ratings = event.feedbackEntries.map(f => f.eventRating).filter(Boolean);
+    const avgRating = ratings.length ? (ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1) : null;
+    const instructorName = event.assignments[0]?.user?.name || "—";
+
+    return {
+      id: event.id,
+      workshopName: event.title,
+      courseName: event.course?.name || "—",
+      moduleName: event.courseModule?.title || "—",
+      instructorName,
+      date: event.startAt,
+      batch: event.batch || "—",
+      venue: event.venue || "—",
+      totalRegistered,
+      totalAttended: present.length,
+      totalAbsent: absent.length,
+      avgRating,
+      presentStudents: present.map(a => ({
+        name: a.user.name,
+        email: a.user.email,
+        rollNo: a.user.studentProfile?.rollNumber || "—"
+      })),
+      absentStudents: absent.map(a => ({
+        name: a.user.name,
+        email: a.user.email,
+        rollNo: a.user.studentProfile?.rollNumber || "—"
+      })),
+      allRegistrants: event.registrations.map(r => ({
+        name: r.user.name,
+        email: r.user.email,
+        rollNo: r.user.studentProfile?.rollNumber || "—",
+        status: r.status
+      }))
+    };
+  });
+};
+
 // DELETE EVENT
 export const deleteEvent = async (eventId) => {
   const event = await prisma.event.delete({

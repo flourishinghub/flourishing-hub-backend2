@@ -17,7 +17,8 @@ import {
   approveUser,
   declineUser,
   createEventFromModule,
-  getEventAnalytics
+  getEventAnalytics,
+  getWorkshopAnalyticsTable
 } from "../services/admin.service.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
@@ -345,4 +346,13 @@ export const getEventAnalyticsController = asyncHandler(async (req, res) => {
 
   const analytics = await getEventAnalytics(filters);
   res.status(StatusCodes.OK).json({ success: true, data: analytics });
+});
+
+// GET WORKSHOP ANALYTICS TABLE
+export const getWorkshopAnalyticsTableController = asyncHandler(async (req, res) => {
+  if (req.user.role !== "ADMIN") {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Admin role required");
+  }
+  const data = await getWorkshopAnalyticsTable();
+  res.status(StatusCodes.OK).json({ success: true, data });
 });

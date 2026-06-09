@@ -99,15 +99,12 @@ const getFrontendRole = (user, explicitRole) => {
     return explicitRole;
   }
 
-  if (user.role === "INSTRUCTOR" && user.email.toLowerCase().includes("associate")) {
-    return "associate-instructor";
-  }
-
   return {
     STUDENT: "student",
     INSTRUCTOR: "instructor",
     ADMIN: "admin",
-    VOLUNTEER: "volunteer"
+    VOLUNTEER: "volunteer",
+    ASSOCIATE_INSTRUCTOR: "associate-instructor"
   }[user.role];
 };
 

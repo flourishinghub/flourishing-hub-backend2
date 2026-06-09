@@ -4,7 +4,7 @@ export const listUsersSchema = z.object({
   body: z.object({}).optional(),
   params: z.object({}).optional(),
   query: z.object({
-    role: z.enum(["STUDENT", "INSTRUCTOR", "ADMIN", "VOLUNTEER"]).optional(),
+    role: z.enum(["STUDENT", "INSTRUCTOR", "ADMIN", "VOLUNTEER", "ASSOCIATE_INSTRUCTOR"]).optional(),
     search: z.string().optional(),
     department: z.string().optional(),
     programme: z.enum(["BTECH", "MTECH", "PHD", "MSC", "MA", "OTHER"]).optional(),
@@ -17,7 +17,7 @@ export const listUsersSchema = z.object({
 
 export const updateUserRoleSchema = z.object({
   body: z.object({
-    role: z.enum(["STUDENT", "INSTRUCTOR", "ADMIN", "VOLUNTEER"])
+    role: z.enum(["STUDENT", "INSTRUCTOR", "ADMIN", "VOLUNTEER", "ASSOCIATE_INSTRUCTOR"])
   }),
   params: z.object({
     userId: z.string().min(5)
