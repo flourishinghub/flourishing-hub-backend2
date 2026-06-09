@@ -8,7 +8,10 @@ import {
   getInstructorDashboardData,
   getVolunteerDashboardData,
   getAssociateDashboardData,
-  getAdminDashboardData
+  getAdminDashboardData,
+  getStudentBundleProgress,
+  getInstructorFeedback,
+  getVolunteerCapacity,
 } from "../services/dashboard.service.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
@@ -80,11 +83,29 @@ export const adminDashboardController = asyncHandler(async (req, res) => {
   }
 
   const data = await getAdminDashboardData();
-  
+
   res.status(StatusCodes.OK).json({
     success: true,
     data
   });
+});
+
+export const studentBundleProgressController = asyncHandler(async (req, res) => {
+  const data = await getStudentBundleProgress(req.user.id);
+  res.status(StatusCodes.OK).json({ success: true, data });
+});
+
+export const instructorFeedbackController = asyncHandler(async (req, res) => {
+  if (!["INSTRUCTOR", "ASSOCIATE_INSTRUCTOR"].includes(req.user.role)) {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Instructor role required");
+  }
+  const data = await getInstructorFeedback(req.user.id);
+  res.status(StatusCodes.OK).json({ success: true, data });
+});
+
+export const volunteerCapacityController = asyncHandler(async (req, res) => {
+  const data = await getVolunteerCapacity(req.user.id);
+  res.status(StatusCodes.OK).json({ success: true, data });
 });
 
 

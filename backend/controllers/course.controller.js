@@ -67,3 +67,20 @@ export const getCourseAnalytics = async (req, res, next) => {
     next(error);
   }
 };
+
+export const bulkEnrollToCourse = async (req, res, next) => {
+  try {
+    if (req.user.role !== "ADMIN") {
+      return res.status(StatusCodes.FORBIDDEN).json({ success: false, message: "Admin only" });
+    }
+    const { courseId } = req.params;
+    const { userEmails } = req.body;
+    if (!Array.isArray(userEmails) || userEmails.length === 0) {
+      return res.status(StatusCodes.BAD_REQUEST).json({ success: false, message: "userEmails array is required" });
+    }
+    const result = await courseService.bulkEnrollToCourse(courseId, userEmails);
+    res.status(StatusCodes.OK).json({ success: true, data: result, message: `Enrolled ${result.enrolled} registrations across ${result.workshopCount} workshops` });
+  } catch (error) {
+    next(error);
+  }
+};

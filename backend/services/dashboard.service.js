@@ -731,6 +731,139 @@ export const getAdminDashboardData = async () => {
   }
 };
 
+// STUDENT BUNDLE PROGRESS API
+export const getStudentBundleProgress = async (userId) => {
+  const [courses, attendedByEvent, attendedByReg] = await Promise.all([
+    prisma.course.findMany({
+      where: { status: "ACTIVE" },
+      include: {
+        events: {
+          where: { status: { in: ["PUBLISHED", "COMPLETED"] } },
+          select: { id: true, title: true, startAt: true },
+          orderBy: { startAt: "asc" },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.attendanceRecord.findMany({
+      where: { userId, status: "PRESENT" },
+      select: { eventId: true },
+    }),
+    prisma.eventRegistration.findMany({
+      where: { userId, status: "ATTENDED" },
+      select: { eventId: true },
+    }),
+  ]);
+
+  const attendedIds = new Set([
+    ...attendedByEvent.map((r) => r.eventId),
+    ...attendedByReg.map((r) => r.eventId),
+  ]);
+
+  return courses.map((course) => {
+    const total = course.events.length || 4;
+    const attended = course.events.filter((e) => attendedIds.has(e.id)).length;
+    return {
+      courseId: course.id,
+      courseName: course.name,
+      isCompulsory: course.isCompulsory,
+      totalWorkshops: total,
+      attended,
+      percentage: total > 0 ? Math.round((attended / total) * 100) : 0,
+    };
+  });
+};
+
+// INSTRUCTOR FEEDBACK PORTAL API
+export const getInstructorFeedback = async (userId) => {
+  const assignments = await prisma.eventStaffAssignment.findMany({
+    where: { userId, role: "INSTRUCTOR" },
+    include: {
+      event: {
+        include: {
+          feedbackEntries: {
+            select: {
+              eventRating: true,
+              instructorRating: true,
+              eventComment: true,
+              instructorComment: true,
+              createdAt: true,
+            },
+          },
+          _count: { select: { registrations: true } },
+        },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  return assignments.map((a) => {
+    const fb = a.event.feedbackEntries;
+    const withInstructorRating = fb.filter((f) => f.instructorRating != null);
+    const avgEvent = fb.length ? fb.reduce((s, f) => s + f.eventRating, 0) / fb.length : null;
+    const avgInstructor = withInstructorRating.length
+      ? withInstructorRating.reduce((s, f) => s + f.instructorRating, 0) / withInstructorRating.length
+      : null;
+
+    return {
+      eventId: a.eventId,
+      eventTitle: a.event.title,
+      totalRegistrations: a.event._count.registrations,
+      totalFeedback: fb.length,
+      avgEventRating: avgEvent !== null ? Math.round(avgEvent * 10) / 10 : null,
+      avgInstructorRating: avgInstructor !== null ? Math.round(avgInstructor * 10) / 10 : null,
+      comments: fb
+        .filter((f) => f.instructorComment || f.eventComment)
+        .map((f) => ({
+          eventComment: f.eventComment || null,
+          instructorComment: f.instructorComment || null,
+          createdAt: f.createdAt,
+        })),
+    };
+  });
+};
+
+// VOLUNTEER REAL-TIME CAPACITY API
+export const getVolunteerCapacity = async (userId) => {
+  const assignments = await prisma.eventStaffAssignment.findMany({
+    where: { userId, role: "VOLUNTEER" },
+    include: {
+      event: {
+        include: {
+          _count: {
+            select: {
+              registrations: true,
+            },
+          },
+        },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  const eventIds = assignments.map((a) => a.eventId);
+
+  const checkedInCounts = await prisma.eventRegistration.groupBy({
+    by: ["eventId"],
+    where: { eventId: { in: eventIds }, status: "ATTENDED" },
+    _count: { _all: true },
+  });
+
+  const checkedInMap = new Map(checkedInCounts.map((c) => [c.eventId, c._count._all]));
+
+  return assignments.map((a) => ({
+    eventId: a.eventId,
+    title: a.event.title,
+    venue: a.event.venue,
+    startAt: a.event.startAt,
+    endAt: a.event.endAt,
+    status: a.event.status,
+    capacity: a.event.capacity,
+    totalRegistered: a.event._count.registrations,
+    checkedIn: checkedInMap.get(a.eventId) || 0,
+  }));
+};
+
 // LEGACY FUNCTIONS (keeping for backward compatibility)
 export const getStudentDashboard = async (userId) => {
   const [user, registrations, completedProgress, pendingModules, openEvents] = await Promise.all([

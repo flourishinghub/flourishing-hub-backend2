@@ -447,6 +447,7 @@ model Course {
   duration           String?
   instructorName     String?
   status             CourseStatus  @default(ACTIVE)
+  isCompulsory       Boolean       @default(false)
   startDate          DateTime?
   endDate            DateTime?
   capacity           Int?

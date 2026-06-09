@@ -46,6 +46,7 @@ export const createCourse = async (data) => {
       duration: data.duration,
       instructorName: data.instructorName,
       status: data.status || "ACTIVE",
+      isCompulsory: data.isCompulsory === true || data.isCompulsory === "true",
       startDate: data.startDate ? new Date(data.startDate) : null,
       endDate: data.endDate ? new Date(data.endDate) : null,
       capacity: data.capacity,
@@ -67,11 +68,57 @@ export const updateCourse = async (courseId, data) => {
   if (data.duration !== undefined) updateData.duration = data.duration;
   if (data.instructorName !== undefined) updateData.instructorName = data.instructorName;
   if (data.status !== undefined) updateData.status = data.status;
+  if (data.isCompulsory !== undefined) updateData.isCompulsory = data.isCompulsory === true || data.isCompulsory === "true";
   if (data.startDate !== undefined) updateData.startDate = data.startDate ? new Date(data.startDate) : null;
   if (data.endDate !== undefined) updateData.endDate = data.endDate ? new Date(data.endDate) : null;
   if (data.capacity !== undefined) updateData.capacity = data.capacity;
 
   return prisma.course.update({ where: { id: courseId }, data: updateData });
+};
+
+export const bulkEnrollToCourse = async (courseId, userEmails) => {
+  const course = await prisma.course.findUnique({
+    where: { id: courseId },
+    include: {
+      events: {
+        where: { status: { in: ["PUBLISHED", "DRAFT"] } },
+        select: { id: true, title: true, startAt: true },
+        orderBy: { startAt: "asc" },
+      },
+    },
+  });
+
+  if (!course) throw new ApiError(StatusCodes.NOT_FOUND, "Course not found");
+
+  const events = course.events;
+  if (events.length === 0) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, "Course has no workshops to enroll into");
+  }
+
+  const results = { enrolled: 0, skipped: 0, errors: [] };
+
+  for (const email of userEmails) {
+    const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+    if (!user) {
+      results.errors.push({ email, message: "User not found" });
+      continue;
+    }
+
+    for (const event of events) {
+      try {
+        await prisma.eventRegistration.upsert({
+          where: { eventId_userId: { eventId: event.id, userId: user.id } },
+          create: { eventId: event.id, userId: user.id, status: "REGISTERED" },
+          update: {},
+        });
+        results.enrolled++;
+      } catch {
+        results.skipped++;
+      }
+    }
+  }
+
+  return { courseId, courseName: course.name, workshopCount: events.length, ...results };
 };
 
 export const deleteCourse = async (courseId) => {

@@ -2,6 +2,7 @@ import express from "express";
 import * as courseController from "../controllers/course.controller.js";
 import * as courseModuleController from "../controllers/courseModule.controller.js";
 import { authenticate } from "../middleware/auth.js";
+import { bulkEnrollToCourse } from "../controllers/course.controller.js";
 
 const router = express.Router();
 
@@ -11,6 +12,7 @@ router.use(authenticate);
 router.get("/", courseController.getAllCourses);
 router.post("/", courseController.createCourse);
 router.get("/:courseId/analytics", courseController.getCourseAnalytics);
+router.post("/:courseId/bulk-enroll", bulkEnrollToCourse);
 router.get("/:courseId", courseController.getCourseById);
 router.put("/:courseId", courseController.updateCourse);
 router.delete("/:courseId", courseController.deleteCourse);
