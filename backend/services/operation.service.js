@@ -488,17 +488,16 @@ export const getEventAssignedVolunteers = async (eventId, actor) => {
 };
 
 export const getMyAssignedEvents = async (actor) => {
-  // Show events from the last 30 days onwards so past/ongoing events are still accessible
-  const thirtyDaysAgo = new Date();
-  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const ninetyDaysAgo = new Date();
+  ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
 
   const assignments = await prisma.eventStaffAssignment.findMany({
     where: {
       userId: actor.id,
       role: "ASSOCIATE_INSTRUCTOR",
       event: {
-        status: "PUBLISHED",
-        startAt: { gte: thirtyDaysAgo }
+        status: { in: ["PUBLISHED", "COMPLETED"] },
+        startAt: { gte: ninetyDaysAgo }
       }
     },
     include: {
@@ -513,9 +512,23 @@ export const getMyAssignedEvents = async (actor) => {
     orderBy: { event: { startAt: "desc" } }
   });
 
-  return assignments.map((a) => ({
-    ...a.event,
-    pendingCheckIns: a.event._count.checkIns
-  }));
+  const now = new Date();
+  return assignments.map((a) => {
+    const ev = a.event;
+    let computedStatus: "live" | "upcoming" | "completed";
+    if (ev.status === "COMPLETED" || new Date(ev.endAt) < now) {
+      computedStatus = "completed";
+    } else if (new Date(ev.startAt) <= now && new Date(ev.endAt) >= now) {
+      computedStatus = "live";
+    } else {
+      computedStatus = "upcoming";
+    }
+    return {
+      ...ev,
+      pendingCheckIns: ev._count.checkIns,
+      registrationCount: ev._count.registrations,
+      computedStatus
+    };
+  });
 };
 
