@@ -26,8 +26,8 @@ const envSchema = z.object({
   JWT_ACCESS_TTL: z.string().default("15m"),
   JWT_REFRESH_TTL: z.string().default("7d"),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().default(15 * 60 * 1000),
-  RATE_LIMIT_MAX: z.coerce.number().default(200),
-  AUTH_RATE_LIMIT_MAX: z.coerce.number().default(20),
+  RATE_LIMIT_MAX: z.coerce.number().default(1000),
+  AUTH_RATE_LIMIT_MAX: z.coerce.number().default(30),
   CACHE_TTL_SECONDS: z.coerce.number().default(60)
 });
 
