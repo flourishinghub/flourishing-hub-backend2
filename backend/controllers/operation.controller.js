@@ -14,7 +14,8 @@ import {
   getMyAssignedEvents,
   getEventRegistrants,
   getEventAssignedVolunteers,
-  getMyCheckIn
+  getMyCheckIn,
+  getMyEventProgress
 } from "../services/operation.service.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 
@@ -113,5 +114,10 @@ export const getEventRegistrantsController = asyncHandler(async (req, res) => {
 
 export const getEventAssignedVolunteersController = asyncHandler(async (req, res) => {
   const data = await getEventAssignedVolunteers(req.params.eventId, req.user);
+  res.status(StatusCodes.OK).json({ success: true, data });
+});
+
+export const getMyEventProgressController = asyncHandler(async (req, res) => {
+  const data = await getMyEventProgress(req.params.eventId, req.user);
   res.status(StatusCodes.OK).json({ success: true, data });
 });

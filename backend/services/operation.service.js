@@ -485,6 +485,37 @@ export const getMyCheckIn = async (eventId, actor) => {
   });
 };
 
+export const getMyEventProgress = async (eventId, actor) => {
+  const progress = await prisma.moduleProgress.findMany({
+    where: {
+      studentProfile: { userId: actor.id },
+      module: { eventId }
+    },
+    include: {
+      module: { select: { title: true, maxMarks: true } }
+    }
+  });
+
+  const feedback = await prisma.feedback.findFirst({
+    where: { eventId, userId: actor.id }
+  });
+
+  const totalMarks = progress.reduce((sum, p) => sum + (p.marksObtained ?? 0), 0);
+  const totalMax = progress.reduce((sum, p) => sum + (p.module.maxMarks ?? 100), 0);
+
+  return {
+    scores: progress.map((p) => ({
+      moduleTitle: p.module.title,
+      marksObtained: p.marksObtained,
+      maxMarks: p.module.maxMarks ?? 100,
+      completedAt: p.completedAt,
+    })),
+    totalMarks: progress.length > 0 ? totalMarks : null,
+    totalMax: progress.length > 0 ? totalMax : null,
+    feedbackRating: feedback?.eventRating ?? null,
+  };
+};
+
 export const getEventRegistrants = async (eventId, actor) => {
   const isAllowed =
     actor.role === "ADMIN" ||
