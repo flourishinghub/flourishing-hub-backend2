@@ -83,6 +83,10 @@ export const createEvent = async (payload, createdById) => {
   const baseSlug = slugify(payload.title);
   const slug = `${baseSlug}-${Date.now()}`;
   const startAt = new Date(payload.startAt);
+  const rawEndAt = new Date(payload.endAt);
+  const endAt = rawEndAt <= startAt
+    ? new Date(startAt.getTime() + 2 * 60 * 60 * 1000)
+    : rawEndAt;
   const templateModules = await resolveTemplateModules(payload);
 
   const event = await prisma.event.create({
@@ -96,7 +100,7 @@ export const createEvent = async (payload, createdById) => {
       venue: payload.venue,
       meetLink: payload.meetLink,
       startAt,
-      endAt: new Date(payload.endAt),
+      endAt,
       registrationOpensAt: payload.registrationOpensAt ? new Date(payload.registrationOpensAt) : undefined,
       registrationClosesAt: payload.registrationClosesAt ? new Date(payload.registrationClosesAt) : undefined,
       capacity: payload.capacity,
@@ -223,7 +227,13 @@ export const updateEvent = async (eventId, payload) => {
       ...(payload.venue !== undefined ? { venue: payload.venue } : {}),
       ...(payload.meetLink !== undefined ? { meetLink: payload.meetLink } : {}),
       ...(payload.startAt ? { startAt: new Date(payload.startAt) } : {}),
-      ...(payload.endAt ? { endAt: new Date(payload.endAt) } : {}),
+      ...(payload.endAt ? {
+        endAt: (() => {
+          const s = payload.startAt ? new Date(payload.startAt) : null;
+          const e = new Date(payload.endAt);
+          return s && e <= s ? new Date(s.getTime() + 2 * 60 * 60 * 1000) : e;
+        })()
+      } : {}),
       ...(payload.registrationOpensAt
         ? { registrationOpensAt: new Date(payload.registrationOpensAt) }
         : {}),
