@@ -398,6 +398,9 @@ export const getAllEventsWithRegistrations = async (filters = {}) => {
         where: { role: { in: ["INSTRUCTOR", "ASSOCIATE_INSTRUCTOR"] } },
         include: { user: { select: { id: true, name: true, role: true } } }
       },
+      modules: {
+        orderBy: { startAt: 'asc' }
+      },
       _count: {
         select: {
           registrations: true,
