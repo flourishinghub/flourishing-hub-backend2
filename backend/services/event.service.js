@@ -29,6 +29,8 @@ const publicEventInclude = {
       startAt: "asc"
     }
   },
+  course: { select: { id: true, name: true } },
+  courseModule: { select: { id: true, title: true, quizLink: true, feedbackLink: true } },
   _count: {
     select: {
       registrations: true,
