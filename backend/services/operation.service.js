@@ -580,7 +580,7 @@ export const getMyAssignedEvents = async (actor) => {
   const now = new Date();
   return assignments.map((a) => {
     const ev = a.event;
-    let computedStatus: "live" | "upcoming" | "completed";
+    let computedStatus;
     if (ev.status === "COMPLETED" || new Date(ev.endAt) < now) {
       computedStatus = "completed";
     } else if (new Date(ev.startAt) <= now && new Date(ev.endAt) >= now) {
