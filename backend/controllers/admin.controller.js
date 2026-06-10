@@ -49,7 +49,7 @@ export const modifyEventController = asyncHandler(async (req, res) => {
   }
 
   const { eventId } = req.params;
-  const event = await modifyEvent(eventId, req.body);
+  const event = await modifyEvent(eventId, req.body, req.user.id);
   
   res.status(StatusCodes.OK).json({
     success: true,

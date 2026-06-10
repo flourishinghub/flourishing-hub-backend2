@@ -31,10 +31,12 @@ export const createEvent = async (eventData, createdById) => {
 };
 
 // MODIFY EVENT
-export const modifyEvent = async (eventId, eventData) => {
+export const modifyEvent = async (eventId, eventData, updatedById) => {
+  const { instructorId, associateInstructorId, ...eventFields } = eventData;
+
   const event = await prisma.event.update({
     where: { id: eventId },
-    data: eventData,
+    data: eventFields,
     include: {
       modules: true,
       assignments: {
@@ -44,6 +46,35 @@ export const modifyEvent = async (eventId, eventData) => {
       }
     }
   });
+
+  // Update staff assignments if provided
+  const rolesToUpdate = [
+    instructorId !== undefined && "INSTRUCTOR",
+    associateInstructorId !== undefined && "ASSOCIATE_INSTRUCTOR",
+  ].filter(Boolean);
+
+  if (rolesToUpdate.length) {
+    await prisma.eventStaffAssignment.deleteMany({
+      where: { eventId, role: { in: rolesToUpdate } },
+    });
+
+    const newAssignments = [
+      instructorId && { userId: instructorId, role: "INSTRUCTOR" },
+      associateInstructorId && { userId: associateInstructorId, role: "ASSOCIATE_INSTRUCTOR" },
+    ].filter((a) => a && a.userId);
+
+    if (newAssignments.length) {
+      await prisma.eventStaffAssignment.createMany({
+        data: newAssignments.map((a) => ({
+          eventId,
+          userId: a.userId,
+          role: a.role,
+          assignedById: updatedById,
+        })),
+        skipDuplicates: true,
+      });
+    }
+  }
 
   return event;
 };
