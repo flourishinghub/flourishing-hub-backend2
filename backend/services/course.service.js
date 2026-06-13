@@ -121,6 +121,42 @@ export const bulkEnrollToCourse = async (courseId, userEmails) => {
   return { courseId, courseName: course.name, workshopCount: events.length, ...results };
 };
 
+export const selfEnrollToCourse = async (courseId, userId) => {
+  const course = await prisma.course.findUnique({
+    where: { id: courseId },
+    include: {
+      events: {
+        where: { status: { in: ['PUBLISHED', 'DRAFT'] } },
+        select: { id: true, title: true, startAt: true },
+        orderBy: { startAt: 'asc' },
+      },
+    },
+  });
+
+  if (!course) throw new ApiError(StatusCodes.NOT_FOUND, 'Course not found');
+  if (course.status !== 'ACTIVE') throw new ApiError(StatusCodes.BAD_REQUEST, 'Course is not currently active');
+  if (course.isCompulsory) throw new ApiError(StatusCodes.BAD_REQUEST, 'Compulsory courses are assigned by admin only');
+
+  const events = course.events;
+  if (events.length === 0) throw new ApiError(StatusCodes.BAD_REQUEST, 'Course has no workshops to enroll into');
+
+  let enrolled = 0, skipped = 0;
+  for (const event of events) {
+    try {
+      await prisma.eventRegistration.upsert({
+        where: { eventId_userId: { eventId: event.id, userId } },
+        create: { eventId: event.id, userId, status: 'REGISTERED' },
+        update: {},
+      });
+      enrolled++;
+    } catch {
+      skipped++;
+    }
+  }
+
+  return { courseId, courseName: course.name, workshopCount: events.length, enrolled, skipped };
+};
+
 export const deleteCourse = async (courseId) => {
   const existing = await prisma.course.findUnique({ where: { id: courseId } });
   if (!existing) {

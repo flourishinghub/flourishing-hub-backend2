@@ -68,6 +68,23 @@ export const getCourseAnalytics = async (req, res, next) => {
   }
 };
 
+export const selfEnrollToCourse = async (req, res, next) => {
+  try {
+    if (req.user.role !== 'STUDENT') {
+      return res.status(403).json({ success: false, message: 'Only students can self-enroll' });
+    }
+    const { courseId } = req.params;
+    const result = await courseService.selfEnrollToCourse(courseId, req.user.id);
+    res.status(200).json({
+      success: true,
+      data: result,
+      message: `Enrolled in ${result.workshopCount} workshops`,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const bulkEnrollToCourse = async (req, res, next) => {
   try {
     if (req.user.role !== "ADMIN") {

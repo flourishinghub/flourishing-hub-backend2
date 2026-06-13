@@ -64,12 +64,33 @@ export const submitQuizResult = async ({ email, eventId, score, secret }) => {
     }
   });
 
+  // Score < 3 → failed; revert attendance to ABSENT so bundle progress doesn't count it
+  const PASSING_SCORE = 3;
+  const passed = score >= PASSING_SCORE;
+
+  if (!passed) {
+    const attendanceRecord = await prisma.attendanceRecord.findFirst({
+      where: { eventId, userId: user.id }
+    });
+    if (attendanceRecord) {
+      await prisma.attendanceRecord.update({
+        where: { id: attendanceRecord.id },
+        data: { status: 'ABSENT' }
+      });
+    }
+    await prisma.eventRegistration.updateMany({
+      where: { eventId, userId: user.id },
+      data: { status: 'REGISTERED' }
+    });
+  }
+
   return {
     studentName: user.name,
     email: user.email,
     eventId,
     moduleId: eventModule.id,
     marksObtained: progress.marksObtained,
-    maxMarks: eventModule.maxMarks
+    maxMarks: eventModule.maxMarks,
+    passed
   };
 };
