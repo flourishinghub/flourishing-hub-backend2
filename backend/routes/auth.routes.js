@@ -6,7 +6,9 @@ import {
   refreshController,
   registerController,
   verifyOTPController,
-  resendOTPController
+  resendOTPController,
+  forgotPasswordController,
+  resetPasswordController
 } from "../controllers/auth.controller.js";
 import { authenticate } from "../middleware/auth.js";
 import { authLimiter } from "../middleware/rateLimit.js";
@@ -23,6 +25,10 @@ authRoutes.get("/me", authenticate, meController);
 // OTP verification routes
 authRoutes.post("/verify-otp", authLimiter, verifyOTPController);
 authRoutes.post("/resend-otp", authLimiter, resendOTPController);
+
+// Password reset routes
+authRoutes.post("/forgot-password", authLimiter, forgotPasswordController);
+authRoutes.post("/reset-password", authLimiter, resetPasswordController);
 
 
 

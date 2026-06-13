@@ -178,6 +178,59 @@ export const login = async ({ email, password }) => {
   return buildAuthResponse(user);
 };
 
+export const forgotPassword = async (email) => {
+  const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+  if (!user) {
+    // Don't reveal if email exists
+    return { message: "If that email is registered, you'll receive a reset link shortly." };
+  }
+
+  const resetToken = crypto.randomBytes(32).toString('hex');
+
+  await prisma.emailVerification.create({
+    data: {
+      userId: user.id,
+      otp: resetToken,
+      expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+    }
+  });
+
+  const clientUrl = process.env.CLIENT_URL || 'https://flourishing-hub-frontend2.vercel.app';
+  const resetLink = `${clientUrl}/reset-password?token=${resetToken}&userId=${user.id}`;
+
+  const { sendPasswordResetEmail } = await import('./email.service.js');
+  await sendPasswordResetEmail(user.email, user.name, resetLink).catch(err =>
+    console.error("Failed to send password reset email:", err)
+  );
+
+  return { message: "If that email is registered, you'll receive a reset link shortly." };
+};
+
+export const resetPassword = async (userId, token, newPassword) => {
+  const record = await prisma.emailVerification.findFirst({
+    where: {
+      userId,
+      otp: token,
+      isUsed: false,
+      expiresAt: { gt: new Date() }
+    }
+  });
+
+  if (!record) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, "Invalid or expired reset link. Please request a new one.");
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, 12);
+
+  await prisma.$transaction([
+    prisma.user.update({ where: { id: userId }, data: { passwordHash } }),
+    prisma.emailVerification.update({ where: { id: record.id }, data: { isUsed: true } }),
+    prisma.refreshToken.updateMany({ where: { userId }, data: { revokedAt: new Date() } }),
+  ]);
+
+  return { message: "Password reset successfully. Please login with your new password." };
+};
+
 export const refreshUserToken = async (refreshToken) => {
   const payload = verifyRefreshToken(refreshToken);
   const tokenHash = crypto.createHash("sha256").update(refreshToken).digest("hex");

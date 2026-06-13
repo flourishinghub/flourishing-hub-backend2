@@ -1,6 +1,6 @@
 import { StatusCodes } from "http-status-codes";
 
-import { login, refreshUserToken, register } from "../services/auth.service.js";
+import { login, refreshUserToken, register, forgotPassword, resetPassword } from "../services/auth.service.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { verifyOTP, resendOTP } from "../services/emailVerification.service.js";
 import { sendWelcomeEmail } from "../services/email.service.js";
@@ -74,6 +74,20 @@ export const resendOTPController = asyncHandler(async (req, res) => {
     success: true,
     message: "OTP sent successfully"
   });
+});
+
+// Forgot Password
+export const forgotPasswordController = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+  const result = await forgotPassword(email);
+  res.status(StatusCodes.OK).json({ success: true, message: result.message });
+});
+
+// Reset Password
+export const resetPasswordController = asyncHandler(async (req, res) => {
+  const { userId, token, newPassword } = req.body;
+  const result = await resetPassword(userId, token, newPassword);
+  res.status(StatusCodes.OK).json({ success: true, message: result.message });
 });
 
 

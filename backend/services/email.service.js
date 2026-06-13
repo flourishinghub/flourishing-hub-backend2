@@ -451,6 +451,75 @@ export const sendReminderEmail = async (email, name, eventTitle, eventDate, even
   }
 };
 
+// Send password reset email
+export const sendPasswordResetEmail = async (email, name, resetLink) => {
+  try {
+    const transporter = createTransporter();
+    if (!transporter) {
+      console.log(`\n========== PASSWORD RESET LINK ==========`);
+      console.log(`Email: ${email}`);
+      console.log(`Link: ${resetLink}`);
+      console.log(`Valid for: 15 minutes`);
+      console.log(`=========================================\n`);
+      return true;
+    }
+    const mailOptions = {
+      from: `"Flourishing Hub, IIT Bombay" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: "Reset Your Password - Flourishing Hub",
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9; }
+            .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+            .content { background: white; padding: 30px; border-radius: 0 0 10px 10px; }
+            .button { display: inline-block; background: #667eea; color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; margin: 20px 0; font-weight: bold; }
+            .warning { background: #fff3cd; border-left: 4px solid #f59e0b; padding: 12px 15px; margin: 20px 0; border-radius: 0 8px 8px 0; font-size: 14px; }
+            .tagline { font-style: italic; color: white; margin-top: 10px; }
+            .footer { text-align: center; margin-top: 20px; font-size: 12px; color: #666; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>🔑 Password Reset</h1>
+              <p>IIT Bombay</p>
+              <p class="tagline">Let's Thrive, Not Just Survive</p>
+            </div>
+            <div class="content">
+              <h2>Hello ${name},</h2>
+              <p>We received a request to reset your Flourishing Hub password. Click the button below to set a new password:</p>
+              <div style="text-align: center;">
+                <a href="${resetLink}" class="button">Reset My Password</a>
+              </div>
+              <div class="warning">
+                <strong>⏰ This link expires in 15 minutes.</strong><br>
+                If you did not request a password reset, please ignore this email — your account is safe.
+              </div>
+              <p>If the button doesn't work, copy and paste this link into your browser:</p>
+              <p style="word-break: break-all; font-size: 12px; color: #666;">${resetLink}</p>
+              <p>Best regards,<br>Flourishing Hub Team<br>IIT Bombay</p>
+            </div>
+            <div class="footer">
+              <p>This is an automated email. Please do not reply to this message.</p>
+              <p>&copy; ${new Date().getFullYear()} Flourishing Hub, IIT Bombay. All rights reserved.</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `
+    };
+    await transporter.sendMail(mailOptions);
+    return true;
+  } catch (error) {
+    console.error("Error sending password reset email:", error);
+    return false;
+  }
+};
+
 // Send pending approval notification email
 export const sendPendingApprovalEmail = async (email, name) => {
   try {
