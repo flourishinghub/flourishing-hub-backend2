@@ -39,6 +39,12 @@ enum EventType {
   OTHER
 }
 
+enum RegistrationMode {
+  COMPULSORY
+  OPTIONAL_BUNDLE
+  OPEN
+}
+
 enum EventStatus {
   DRAFT
   PUBLISHED
@@ -216,6 +222,9 @@ model Event {
   isCampusWide          Boolean                @default(true)
   allowVolunteerSignup  Boolean                @default(true)
   requiresCheckIn       Boolean                @default(true)
+  registrationMode      RegistrationMode       @default(OPEN)
+  quizLink              String?
+  feedbackLink          String?
   createdById           String
   templateId            String?
   courseId              String?
