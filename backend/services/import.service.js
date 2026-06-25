@@ -127,10 +127,10 @@ const combineDateAndTime = (dateValue, timeValue) => {
 
 const mapScheduleRowToEventPayload = (row, meta = {}) => {
   const courseName = normalizeString(
-    getRowValue(row, ["courseName", "Course Name", "course"])
+    getRowValue(row, ["courseName", "Course Name", "course", "workshop name", "workshopName"])
   );
   const tutorial = normalizeString(
-    getRowValue(row, ["tutorial", "session", "batch", "Batch"])
+    getRowValue(row, ["tutorial", "session", "batch", "Batch", "tutorial/batch"])
   );
   const sessionDate = getRowValue(row, ["sessionDate", "Session- Date", "date"]);
   const sessionTime = getRowValue(row, ["time", "sessionTime"]);
@@ -179,7 +179,48 @@ const mapScheduleRowToEventPayload = (row, meta = {}) => {
     isCampusWide: normalizeBoolean(meta.isCampusWide, true),
     allowVolunteerSignup: normalizeBoolean(meta.allowVolunteerSignup, true),
     requiresCheckIn: normalizeBoolean(meta.requiresCheckIn, true),
-    templateId: normalizeString(meta.templateId)
+    templateId: normalizeString(meta.templateId),
+    courseId: normalizeString(meta.courseId) || undefined,
+    courseModuleId: normalizeString(meta.courseModuleId) || undefined,
+    batch: tutorial || undefined,
+  };
+};
+
+// Used when course + workshop module are pre-selected from the modal
+const mapScheduleRowWithModule = (row, module, meta = {}) => {
+  const sessionDate = getRowValue(row, ["date", "sessionDate", "Session- Date"]);
+  const sessionTime = getRowValue(row, ["time", "sessionTime"]);
+  const durationHours = normalizeNumber(getRowValue(row, ["duration", "Duration (hrs)", "Duration"]));
+  const venue = normalizeString(getRowValue(row, ["venue", "location"]));
+  const instructor = normalizeString(getRowValue(row, ["instructor", "faculty"]));
+  const batch = normalizeString(getRowValue(row, ["tutorial/batch", "tutorial", "batch", "Batch", "session"]));
+
+  const startAt = combineDateAndTime(sessionDate, sessionTime);
+  if (!startAt) return null;
+
+  const endAt = new Date(startAt.getTime() + Math.round((durationHours || 2) * 60) * 60 * 1000);
+
+  const title = module?.title || normalizeString(getRowValue(row, ["workshop name", "workshopName", "title"])) || "Workshop";
+  const descriptionParts = [
+    module?.description || `Workshop session for ${title}.`,
+    instructor ? `Instructor: ${instructor}.` : null,
+    batch ? `Batch/Tutorial: ${batch}.` : null,
+  ].filter(Boolean);
+
+  return {
+    title,
+    description: descriptionParts.join(" "),
+    type: "WELLNESS_COURSE",
+    status: "PUBLISHED",
+    venue,
+    startAt: startAt.toISOString(),
+    endAt: endAt.toISOString(),
+    courseId: meta.courseId || undefined,
+    courseModuleId: meta.courseModuleId || undefined,
+    batch: batch || undefined,
+    isCampusWide: true,
+    allowVolunteerSignup: true,
+    requiresCheckIn: true,
   };
 };
 
@@ -554,8 +595,25 @@ const importUsers = async (rows, meta) => {
   });
 };
 
-const importEvents = async (rows, meta, createdById) =>
-  isScheduleStyleEventSheet(rows)
+const importEvents = async (rows, meta, createdById) => {
+  // Module-based import: course + workshop selected from the modal
+  if (meta.courseId && meta.courseModuleId) {
+    const module = await prisma.courseModule.findUnique({
+      where: { id: meta.courseModuleId },
+      select: { id: true, title: true, description: true }
+    });
+
+    return executeImportRows(rows, async (row) => {
+      const payload = mapScheduleRowWithModule(row, module, meta);
+      if (!payload) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, "Row missing date or time");
+      }
+      await createEvent(payload, createdById);
+      return { created: 1 };
+    });
+  }
+
+  return isScheduleStyleEventSheet(rows)
     ? executeImportRows(buildGroupedScheduleEvents(rows, meta), async (payload) => {
         if (!payload.title || !payload.description || !payload.type || !payload.startAt || !payload.endAt) {
           throw new ApiError(StatusCodes.BAD_REQUEST, "Event row is missing required fields");
@@ -597,6 +655,7 @@ const importEvents = async (rows, meta, createdById) =>
     await createEvent(payload, createdById);
     return { created: 1 };
   });
+};
 
 const importRegistrations = async (rows, meta) =>
   executeImportRows(rows, async (row) => {
@@ -767,9 +826,11 @@ export const listImportJobs = async () =>
     }
   });
 
-export const processImportUpload = async ({ type, fileName, fileBuffer, meta }, createdById) => {
+export const processImportUpload = async ({ type, fileName, fileBuffer, meta, courseId, courseModuleId }, createdById) => {
   const normalizedType = normalizeString(type);
   const parsedMeta = parseMeta(meta);
+  if (courseId) parsedMeta.courseId = courseId;
+  if (courseModuleId) parsedMeta.courseModuleId = courseModuleId;
   const allowedTypes = new Set([
     "USERS",
     "EVENTS",

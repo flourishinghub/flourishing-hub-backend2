@@ -111,6 +111,9 @@ export const createEvent = async (payload, createdById) => {
       allowVolunteerSignup: payload.allowVolunteerSignup ?? true,
       requiresCheckIn: payload.requiresCheckIn ?? true,
       templateId: payload.templateId,
+      courseId: payload.courseId || undefined,
+      courseModuleId: payload.courseModuleId || undefined,
+      batch: payload.batch || undefined,
       createdById,
       modules: templateModules.length
         ? {

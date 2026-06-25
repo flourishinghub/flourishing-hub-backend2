@@ -31,7 +31,9 @@ export const uploadImportController = asyncHandler(async (req, res) => {
       type: req.body.type,
       fileName: req.file?.originalname,
       fileBuffer: req.file?.buffer,
-      meta: req.body.meta
+      meta: req.body.meta,
+      courseId: req.body.courseId || null,
+      courseModuleId: req.body.courseModuleId || null,
     },
     req.user.id
   );
