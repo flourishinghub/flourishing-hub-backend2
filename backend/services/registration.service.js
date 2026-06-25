@@ -27,6 +27,13 @@ export const registerForEvent = async ({ eventId, asVolunteer }, user) => {
     throw new ApiError(StatusCodes.NOT_FOUND, "Event is not available for registration");
   }
 
+  // Registration stays open until 15 minutes after the event starts, then closes.
+  const REGISTRATION_GRACE_MS = 15 * 60 * 1000;
+  const registrationDeadline = new Date(new Date(event.startAt).getTime() + REGISTRATION_GRACE_MS);
+  if (new Date() > registrationDeadline) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, "Registration for this event has closed");
+  }
+
   if (event.registrationClosesAt && event.registrationClosesAt < new Date()) {
     throw new ApiError(StatusCodes.BAD_REQUEST, "Registration for this event has closed");
   }
