@@ -14,6 +14,8 @@ import { router } from "./routes/index.js";
 export const app = express();
 
 app.set("trust proxy", env.TRUST_PROXY);
+// Disable ETag so authenticated API responses are never served stale by shared proxies
+app.set("etag", false);
 
 app.use(
   cors({
@@ -44,6 +46,12 @@ app.get("/health", (_req, res) => {
   });
 });
 
+// Stop shared proxies (e.g. campus Squid) from caching per-user API responses,
+// which caused stale usernames (/auth/me) and missing newly-created events (/events)
+app.use(env.API_PREFIX, (_req, res, next) => {
+  res.set("Cache-Control", "no-store");
+  next();
+});
 app.use(env.API_PREFIX, router);
 app.use(notFoundHandler);
 app.use(errorHandler);
