@@ -715,7 +715,7 @@ export const generateExcelExport = async () => {
     prisma.course.findMany({
       include: {
         modules: { select: { id: true, title: true } },
-        _count: { select: { events: true, registrations: true } }
+        _count: { select: { events: true, modules: true } }
       }
     }),
     prisma.event.findMany({
@@ -764,7 +764,7 @@ export const generateExcelExport = async () => {
 
   for (const course of courses) {
     const courseEvents = events.filter(e => e.courseId === course.id);
-    const totalReg = course._count.registrations;
+    const totalReg = courseEvents.reduce((s, e) => s + e.registrations.length, 0);
     const totalAttended = courseEvents.reduce((s, e) => s + e.attendances.filter(a => a.status === 'PRESENT').length, 0);
     const totalPossible = courseEvents.reduce((s, e) => s + e.registrations.length, 0);
     const allScores = courseEvents.flatMap(e => e.modules.flatMap(m => m.progressEntries.map(p => p.marksObtained).filter(v => v != null)));
