@@ -4,7 +4,8 @@ import {
   createImportJobController,
   downloadImportTemplateController,
   listImportJobsController,
-  uploadImportController
+  uploadImportController,
+  previewImportController
 } from "../controllers/import.controller.js";
 import { authenticate } from "../middleware/auth.js";
 import { authorize } from "../middleware/authorize.js";
@@ -24,6 +25,7 @@ importRoutes.get(
   validate(downloadImportTemplateSchema),
   downloadImportTemplateController
 );
+importRoutes.post("/preview", spreadsheetUpload.single("file"), previewImportController);
 importRoutes.post("/upload", spreadsheetUpload.single("file"), uploadImportController);
 importRoutes.post("/", validate(createImportJobSchema), createImportJobController);
 

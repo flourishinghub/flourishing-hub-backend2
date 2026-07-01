@@ -595,6 +595,18 @@ const importUsers = async (rows, meta) => {
   });
 };
 
+const autoRegisterBatch = async (eventId, batchCode) => {
+  const students = await prisma.user.findMany({
+    where: { role: "STUDENT", studentProfile: { cohort: batchCode } },
+    select: { id: true }
+  });
+  if (!students.length) return;
+  await prisma.eventRegistration.createMany({
+    data: students.map(s => ({ eventId, userId: s.id, status: "REGISTERED" })),
+    skipDuplicates: true
+  });
+};
+
 const importEvents = async (rows, meta, createdById) => {
   // Module-based import: course + workshop selected from the modal
   if (meta.courseId && meta.courseModuleId) {
@@ -608,7 +620,13 @@ const importEvents = async (rows, meta, createdById) => {
       if (!payload) {
         throw new ApiError(StatusCodes.BAD_REQUEST, "Row missing date or time");
       }
-      await createEvent(payload, createdById);
+      if (meta.batchCode && !payload.batch) {
+        payload.batch = meta.batchCode;
+      }
+      const event = await createEvent(payload, createdById);
+      if (meta.batchCode) {
+        await autoRegisterBatch(event.id, meta.batchCode);
+      }
       return { created: 1 };
     });
   }
@@ -826,11 +844,35 @@ export const listImportJobs = async () =>
     }
   });
 
-export const processImportUpload = async ({ type, fileName, fileBuffer, meta, courseId, courseModuleId }, createdById) => {
+export const previewImportEvents = async ({ fileBuffer, fileName, courseId, courseModuleId, batchCode }) => {
+  if (!fileBuffer) throw new ApiError(StatusCodes.BAD_REQUEST, "File is required");
+  const rows = await parseWorkbookRows(fileBuffer, { fileName });
+  if (!rows.length) throw new ApiError(StatusCodes.BAD_REQUEST, "No data rows found in file");
+
+  let events = [];
+  if (courseId && courseModuleId) {
+    const mod = await prisma.courseModule.findUnique({
+      where: { id: courseModuleId },
+      select: { id: true, title: true, description: true }
+    });
+    events = rows.map(row => mapScheduleRowWithModule(row, mod, { courseId, courseModuleId })).filter(Boolean);
+  } else {
+    events = rows.map(row => mapScheduleRowToEventPayload(row, {})).filter(Boolean);
+  }
+
+  if (batchCode) {
+    events = events.map(e => ({ ...e, batch: batchCode }));
+  }
+
+  return events;
+};
+
+export const processImportUpload = async ({ type, fileName, fileBuffer, meta, courseId, courseModuleId, batchCode }, createdById) => {
   const normalizedType = normalizeString(type);
   const parsedMeta = parseMeta(meta);
   if (courseId) parsedMeta.courseId = courseId;
   if (courseModuleId) parsedMeta.courseModuleId = courseModuleId;
+  if (batchCode) parsedMeta.batchCode = batchCode;
   const allowedTypes = new Set([
     "USERS",
     "EVENTS",

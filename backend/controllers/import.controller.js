@@ -4,7 +4,8 @@ import {
   buildImportTemplate,
   createImportJob,
   listImportJobs,
-  processImportUpload
+  processImportUpload,
+  previewImportEvents
 } from "../services/import.service.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 
@@ -28,12 +29,13 @@ export const listImportJobsController = asyncHandler(async (_req, res) => {
 export const uploadImportController = asyncHandler(async (req, res) => {
   const data = await processImportUpload(
     {
-      type: req.body.type,
+      type: req.body.type || "EVENTS",
       fileName: req.file?.originalname,
       fileBuffer: req.file?.buffer,
       meta: req.body.meta,
       courseId: req.body.courseId || null,
       courseModuleId: req.body.courseModuleId || null,
+      batchCode: req.body.batchCode || null,
     },
     req.user.id
   );
@@ -42,6 +44,21 @@ export const uploadImportController = asyncHandler(async (req, res) => {
     success: true,
     message: "Import processed successfully",
     data
+  });
+});
+
+export const previewImportController = asyncHandler(async (req, res) => {
+  const events = await previewImportEvents({
+    fileBuffer: req.file?.buffer,
+    fileName: req.file?.originalname,
+    courseId: req.body.courseId || null,
+    courseModuleId: req.body.courseModuleId || null,
+    batchCode: req.body.batchCode || null,
+  });
+
+  res.status(StatusCodes.OK).json({
+    success: true,
+    data: events
   });
 });
 
