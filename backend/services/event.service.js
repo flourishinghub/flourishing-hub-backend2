@@ -172,6 +172,10 @@ export const listEvents = async (query) => {
             ...(query.to ? { lte: new Date(query.to) } : {})
           }
         }
+      : {}),
+    // Batch filter: if batch param provided, show events with no batch OR matching batch
+    ...(query.batch !== undefined
+      ? { OR: [{ batch: null }, ...(query.batch ? [{ batch: query.batch }] : [])] }
       : {})
   };
 

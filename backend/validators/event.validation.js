@@ -64,11 +64,13 @@ export const listEventSchema = z.object({
     status: z.enum(["DRAFT", "PUBLISHED", "COMPLETED", "CANCELLED"]).optional(),
     type: z.enum(["OPEN_WORKSHOP", "WELLNESS_COURSE", "PLACEMENT_WORKSHOP", "PHD_WORKSHOP", "OTHER"]).optional(),
     upcomingOnly: z.enum(["true", "false"]).optional(),
+    activeOnly: z.enum(["true", "false"]).optional(),
     registeredOnly: z.enum(["true", "false"]).optional(),
     from: z.string().datetime().optional(),
     to: z.string().datetime().optional(),
     page: z.coerce.number().optional(),
-    limit: z.coerce.number().optional()
+    limit: z.coerce.number().optional(),
+    batch: z.string().optional()
   })
 });
 
