@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { authenticate } from "../middleware/auth.js";
 import { authorize } from "../middleware/authorize.js";
-import { upload } from "../middleware/upload.js";
+import { spreadsheetUpload } from "../middleware/upload.js";
 import {
   uploadBatchAssignmentController,
   getBatchStatsController,
@@ -13,6 +13,6 @@ export const batchAssignmentRoutes = Router();
 batchAssignmentRoutes.use(authenticate);
 batchAssignmentRoutes.use(authorize("ADMIN"));
 
-batchAssignmentRoutes.post("/upload", upload.single("file"), uploadBatchAssignmentController);
+batchAssignmentRoutes.post("/upload", spreadsheetUpload.single("file"), uploadBatchAssignmentController);
 batchAssignmentRoutes.get("/stats", getBatchStatsController);
 batchAssignmentRoutes.get("/template", downloadTemplateController);
