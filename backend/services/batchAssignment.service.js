@@ -7,11 +7,12 @@ const norm = (v) => (v === undefined || v === null ? null : String(v).trim() || 
 const normLower = (v) => norm(v)?.toLowerCase() ?? null;
 const normInt = (v) => { const n = parseInt(v); return isNaN(n) ? null : n; };
 
+const normalizeKey = (k) => k.trim().toLowerCase().replace(/[\s._\-/]+/g, '');
+
 const getCol = (row, keys) => {
-  for (const k of keys) {
-    const found = Object.entries(row).find(([col]) => col.trim().toLowerCase() === k.toLowerCase());
-    if (found && found[1] !== undefined && found[1] !== null && String(found[1]).trim() !== '') return found[1];
-  }
+  const normKeys = new Set(keys.map(normalizeKey));
+  const found = Object.entries(row).find(([col]) => normKeys.has(normalizeKey(col)));
+  if (found && found[1] !== undefined && found[1] !== null && String(found[1]).trim() !== '') return found[1];
   return null;
 };
 
@@ -27,7 +28,7 @@ export const uploadBatchAssignment = async ({ fileBuffer, fileName }) => {
     const row = rows[i];
     try {
       const email = normLower(getCol(row, ['email', 'Email', 'EMAIL']));
-      const rollNumber = norm(getCol(row, ['roll_no', 'rollno', 'roll_number', 'rollnumber', 'Roll No', 'Roll Number', 'RollNo', 'ROLL_NO']));
+      const rollNumber = norm(getCol(row, ['roll_no', 'rollno', 'roll_number', 'rollnumber', 'Roll No', 'Roll No.', 'Roll Number', 'RollNo', 'ROLL_NO', 'rollno.']));
       const batchCode = norm(getCol(row, ['batch_code', 'batchcode', 'batch', 'Batch', 'Batch Code', 'BATCH', 'BATCH_CODE']));
       const name = norm(getCol(row, ['name', 'Name', 'NAME', 'Student Name', 'student_name']));
       const department = norm(getCol(row, ['department', 'dept', 'Department', 'DEPT', 'Dept']));
