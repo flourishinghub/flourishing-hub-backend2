@@ -492,3 +492,24 @@ model CourseModule {
   @@index([courseId, order])
   @@index([isActive])
 }
+
+model BatchAssignment {
+  id            String   @id @default(cuid())
+  email         String?
+  rollNumber    String?
+  batchCode     String
+  name          String?
+  department    String?
+  programme     String?
+  yearOfStudy   Int?
+  section       String?
+  isMatched     Boolean  @default(false)
+  matchedUserId String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([email])
+  @@index([rollNumber])
+  @@index([batchCode])
+  @@index([isMatched])
+}

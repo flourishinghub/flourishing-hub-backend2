@@ -10,6 +10,7 @@ import {
   verifyRefreshToken
 } from "../utils/jwt.js";
 import { createAndSendOTP } from "./emailVerification.service.js";
+import { autoAssignCohortOnSignup } from "./batchAssignment.service.js";
 
 const buildAuthResponse = async (user) => {
   const accessToken = signAccessToken({
@@ -94,6 +95,11 @@ export const register = async (payload) => {
       adminProfile: true
     }
   });
+
+  // Auto-assign cohort if BatchAssignment record exists
+  if (user.studentProfile) {
+    await autoAssignCohortOnSignup(user.id, user.email, payload.studentProfile?.rollNumber).catch(() => {});
+  }
 
   if (isIITBEmail) {
     // IITB email: Send OTP for verification

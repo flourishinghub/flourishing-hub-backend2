@@ -14,6 +14,7 @@ import { videoRoutes } from "./video.routes.js";
 import courseRoutes from "./course.routes.js";
 import { notificationRoutes } from "./notification.routes.js";
 import { quizRoutes } from "./quiz.routes.js";
+import { batchAssignmentRoutes } from "./batchAssignment.routes.js";
 
 export const router = Router();
 
@@ -31,6 +32,7 @@ router.use("/videos", videoRoutes); // Video library routes
 router.use("/courses", courseRoutes); // Course management routes
 router.use("/notifications", notificationRoutes);
 router.use("/quiz", quizRoutes);
+router.use("/batch-assignments", batchAssignmentRoutes);
 
 
 
