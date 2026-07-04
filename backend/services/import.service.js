@@ -210,11 +210,12 @@ const mapScheduleRowWithModule = (row, module, meta = {}) => {
   return {
     title,
     description: descriptionParts.join(" "),
-    type: "WELLNESS_COURSE",
+    type: normalizeString(meta.defaultType) || "WELLNESS_COURSE",
     status: "PUBLISHED",
     venue,
     startAt: startAt.toISOString(),
     endAt: endAt.toISOString(),
+    capacity: normalizeNumber(meta.capacity) || undefined,
     courseId: meta.courseId || undefined,
     courseModuleId: meta.courseModuleId || undefined,
     batch: batch || undefined,
@@ -624,7 +625,7 @@ const importEvents = async (rows, meta, createdById) => {
         payload.batch = meta.batchCode;
       }
       const event = await createEvent(payload, createdById);
-      if (meta.batchCode) {
+      if (meta.batchCode && meta.workshopType !== 'optional') {
         await autoRegisterBatch(event.id, meta.batchCode);
       }
       return { created: 1 };
@@ -844,20 +845,26 @@ export const listImportJobs = async () =>
     }
   });
 
-export const previewImportEvents = async ({ fileBuffer, fileName, courseId, courseModuleId, batchCode }) => {
+export const previewImportEvents = async ({ fileBuffer, fileName, courseId, courseModuleId, batchCode, capacity, workshopType }) => {
   if (!fileBuffer) throw new ApiError(StatusCodes.BAD_REQUEST, "File is required");
   const rows = await parseWorkbookRows(fileBuffer, { fileName });
   if (!rows.length) throw new ApiError(StatusCodes.BAD_REQUEST, "No data rows found in file");
 
   let events = [];
+  const metaForPreview = { courseId, courseModuleId };
+  if (workshopType === 'optional') {
+    metaForPreview.defaultType = 'OPEN_WORKSHOP';
+    metaForPreview.capacity = capacity || 60;
+  }
+
   if (courseId && courseModuleId) {
     const mod = await prisma.courseModule.findUnique({
       where: { id: courseModuleId },
       select: { id: true, title: true, description: true }
     });
-    events = rows.map(row => mapScheduleRowWithModule(row, mod, { courseId, courseModuleId })).filter(Boolean);
+    events = rows.map(row => mapScheduleRowWithModule(row, mod, metaForPreview)).filter(Boolean);
   } else {
-    events = rows.map(row => mapScheduleRowToEventPayload(row, {})).filter(Boolean);
+    events = rows.map(row => mapScheduleRowToEventPayload(row, metaForPreview)).filter(Boolean);
   }
 
   if (batchCode) {
@@ -867,12 +874,17 @@ export const previewImportEvents = async ({ fileBuffer, fileName, courseId, cour
   return events;
 };
 
-export const processImportUpload = async ({ type, fileName, fileBuffer, meta, courseId, courseModuleId, batchCode }, createdById) => {
+export const processImportUpload = async ({ type, fileName, fileBuffer, meta, courseId, courseModuleId, batchCode, capacity, workshopType }, createdById) => {
   const normalizedType = normalizeString(type);
   const parsedMeta = parseMeta(meta);
   if (courseId) parsedMeta.courseId = courseId;
   if (courseModuleId) parsedMeta.courseModuleId = courseModuleId;
   if (batchCode) parsedMeta.batchCode = batchCode;
+  if (workshopType === 'optional') {
+    parsedMeta.defaultType = 'OPEN_WORKSHOP';
+    parsedMeta.capacity = capacity || 60;
+    parsedMeta.workshopType = 'optional';
+  }
   const allowedTypes = new Set([
     "USERS",
     "EVENTS",

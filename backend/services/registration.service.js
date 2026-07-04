@@ -36,7 +36,8 @@ export const registerForEvent = async ({ eventId, asVolunteer }, user) => {
   }
 
   if (event.capacity && event._count.registrations >= event.capacity) {
-    throw new ApiError(StatusCodes.CONFLICT, "Event capacity is full");
+    createNotification(user.id, "warning", "Seats Full", `Seats are full for "${event.title}". Please try to register for an upcoming course.`, eventId).catch(() => {});
+    throw new ApiError(StatusCodes.CONFLICT, "Seats are full for this workshop. Please try to register for an upcoming course.");
   }
 
   if (asVolunteer && !event.allowVolunteerSignup) {

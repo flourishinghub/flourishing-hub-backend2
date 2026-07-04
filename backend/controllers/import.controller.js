@@ -36,6 +36,8 @@ export const uploadImportController = asyncHandler(async (req, res) => {
       courseId: req.body.courseId || null,
       courseModuleId: req.body.courseModuleId || null,
       batchCode: req.body.batchCode || null,
+      capacity: req.body.capacity ? parseInt(req.body.capacity) : null,
+      workshopType: req.body.workshopType || null,
     },
     req.user.id
   );
@@ -54,6 +56,8 @@ export const previewImportController = asyncHandler(async (req, res) => {
     courseId: req.body.courseId || null,
     courseModuleId: req.body.courseModuleId || null,
     batchCode: req.body.batchCode || null,
+    capacity: req.body.capacity ? parseInt(req.body.capacity) : null,
+    workshopType: req.body.workshopType || null,
   });
 
   res.status(StatusCodes.OK).json({
