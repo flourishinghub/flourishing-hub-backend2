@@ -24,86 +24,123 @@ export const uploadBatchAssignment = async ({ fileBuffer, fileName }) => {
 
   const results = { total: rows.length, matched: 0, stored: 0, skipped: 0, errors: [] };
 
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
+  // Parse + validate every row first (no DB calls yet).
+  const parsedRows = rows.map((row, i) => {
+    const email = normLower(getCol(row, ['email', 'Email', 'EMAIL']));
+    const rollNumber = norm(getCol(row, ['roll_no', 'rollno', 'roll_number', 'rollnumber', 'Roll No', 'Roll No.', 'Roll Number', 'RollNo', 'ROLL_NO', 'rollno.']));
+    const batchCode = norm(getCol(row, ['batch_code', 'batchcode', 'batch', 'Batch', 'Batch Code', 'BATCH', 'BATCH_CODE']));
+    const name = norm(getCol(row, ['name', 'Name', 'NAME', 'Student Name', 'student_name']));
+    const department = norm(getCol(row, ['department', 'dept', 'Department', 'DEPT', 'Dept']));
+    const programme = norm(getCol(row, ['programme', 'program', 'Programme', 'Program', 'PROGRAMME']));
+    const yearOfStudy = normInt(getCol(row, ['year', 'year_of_study', 'yearofstudy', 'Year', 'Year of Study']));
+    const section = norm(getCol(row, ['section', 'Section', 'SECTION']));
+
+    return { rowNumber: i + 2, email, rollNumber, batchCode, name, department, programme, yearOfStudy, section };
+  });
+
+  const validRows = [];
+  for (const row of parsedRows) {
+    if (!row.batchCode) {
+      results.errors.push({ row: row.rowNumber, message: "batch_code is required" });
+      results.skipped++;
+      continue;
+    }
+    if (!row.email && !row.rollNumber) {
+      results.errors.push({ row: row.rowNumber, message: "email or roll_no is required" });
+      results.skipped++;
+      continue;
+    }
+    validRows.push(row);
+  }
+
+  if (validRows.length === 0) {
+    return results;
+  }
+
+  // Fetch every user and existing BatchAssignment row that could possibly match, in
+  // two bulk queries up front — instead of up to 4 sequential DB round-trips per row.
+  const emails = [...new Set(validRows.map((r) => r.email).filter(Boolean))];
+  const rollNumbers = [...new Set(validRows.map((r) => r.rollNumber).filter(Boolean))];
+
+  const [existingUsers, existingAssignments] = await Promise.all([
+    prisma.user.findMany({
+      where: {
+        OR: [
+          ...(emails.length ? [{ email: { in: emails } }] : []),
+          ...(rollNumbers.length ? [{ studentProfile: { rollNumber: { in: rollNumbers } } }] : [])
+        ]
+      },
+      include: { studentProfile: true }
+    }),
+    prisma.batchAssignment.findMany({
+      where: {
+        OR: [
+          ...(emails.length ? [{ email: { in: emails } }] : []),
+          ...(rollNumbers.length ? [{ rollNumber: { in: rollNumbers } }] : [])
+        ]
+      }
+    })
+  ]);
+
+  const userByEmail = new Map(existingUsers.filter((u) => u.email).map((u) => [u.email.toLowerCase(), u]));
+  const userByRollNumber = new Map(
+    existingUsers.filter((u) => u.studentProfile?.rollNumber).map((u) => [u.studentProfile.rollNumber, u])
+  );
+  const assignmentByEmail = new Map(existingAssignments.filter((a) => a.email).map((a) => [a.email, a]));
+  const assignmentByRollNumber = new Map(existingAssignments.filter((a) => a.rollNumber).map((a) => [a.rollNumber, a]));
+
+  for (const row of validRows) {
+    const { rowNumber, email, rollNumber, batchCode, name, department, programme, yearOfStudy, section } = row;
+
     try {
-      const email = normLower(getCol(row, ['email', 'Email', 'EMAIL']));
-      const rollNumber = norm(getCol(row, ['roll_no', 'rollno', 'roll_number', 'rollnumber', 'Roll No', 'Roll No.', 'Roll Number', 'RollNo', 'ROLL_NO', 'rollno.']));
-      const batchCode = norm(getCol(row, ['batch_code', 'batchcode', 'batch', 'Batch', 'Batch Code', 'BATCH', 'BATCH_CODE']));
-      const name = norm(getCol(row, ['name', 'Name', 'NAME', 'Student Name', 'student_name']));
-      const department = norm(getCol(row, ['department', 'dept', 'Department', 'DEPT', 'Dept']));
-      const programme = norm(getCol(row, ['programme', 'program', 'Programme', 'Program', 'PROGRAMME']));
-      const yearOfStudy = normInt(getCol(row, ['year', 'year_of_study', 'yearofstudy', 'Year', 'Year of Study']));
-      const section = norm(getCol(row, ['section', 'Section', 'SECTION']));
+      const existingUser = (email && userByEmail.get(email)) || (rollNumber && userByRollNumber.get(rollNumber)) || null;
+      const existingAssignment = (email && assignmentByEmail.get(email)) || (rollNumber && assignmentByRollNumber.get(rollNumber)) || null;
 
-      if (!batchCode) {
-        results.errors.push({ row: i + 2, message: "batch_code is required" });
-        results.skipped++;
-        continue;
-      }
-      if (!email && !rollNumber) {
-        results.errors.push({ row: i + 2, message: "email or roll_no is required" });
-        results.skipped++;
-        continue;
-      }
-
-      // Find existing student by email OR roll number
-      const existingUser = await prisma.user.findFirst({
-        where: {
-          OR: [
-            ...(email ? [{ email }] : []),
-            ...(rollNumber ? [{ studentProfile: { rollNumber } }] : [])
-          ]
-        },
-        include: { studentProfile: true }
-      });
+      let savedAssignment;
 
       if (existingUser?.studentProfile) {
-        // Student already signed up — update cohort directly
-        await prisma.studentProfile.update({
-          where: { id: existingUser.studentProfile.id },
-          data: {
-            cohort: batchCode,
-            ...(department ? { department } : {}),
-            ...(yearOfStudy !== null ? { yearOfStudy } : {}),
-            ...(section !== null ? { section } : {}),
-          }
-        });
-
-        // Also store in BatchAssignment table for reference
-        const existing = await prisma.batchAssignment.findFirst({
-          where: { OR: [...(email ? [{ email }] : []), ...(rollNumber ? [{ rollNumber }] : [])] }
-        });
-        if (existing) {
-          await prisma.batchAssignment.update({
-            where: { id: existing.id },
-            data: { email, rollNumber, batchCode, name, department, programme, yearOfStudy, section, isMatched: true, matchedUserId: existingUser.id }
-          });
-        } else {
-          await prisma.batchAssignment.create({
-            data: { email, rollNumber, batchCode, name, department, programme, yearOfStudy, section, isMatched: true, matchedUserId: existingUser.id }
-          });
-        }
+        // Student already signed up — update their profile and the BatchAssignment
+        // reference row atomically (both writes succeed together, or neither does).
+        const [, assignment] = await prisma.$transaction([
+          prisma.studentProfile.update({
+            where: { id: existingUser.studentProfile.id },
+            data: {
+              cohort: batchCode,
+              ...(department ? { department } : {}),
+              ...(yearOfStudy !== null ? { yearOfStudy } : {}),
+              ...(section !== null ? { section } : {}),
+            }
+          }),
+          existingAssignment
+            ? prisma.batchAssignment.update({
+                where: { id: existingAssignment.id },
+                data: { email, rollNumber, batchCode, name, department, programme, yearOfStudy, section, isMatched: true, matchedUserId: existingUser.id }
+              })
+            : prisma.batchAssignment.create({
+                data: { email, rollNumber, batchCode, name, department, programme, yearOfStudy, section, isMatched: true, matchedUserId: existingUser.id }
+              })
+        ]);
+        savedAssignment = assignment;
         results.matched++;
       } else {
         // Student hasn't signed up yet — store for later
-        const existing = await prisma.batchAssignment.findFirst({
-          where: { OR: [...(email ? [{ email }] : []), ...(rollNumber ? [{ rollNumber }] : [])] }
-        });
-        if (existing) {
-          await prisma.batchAssignment.update({
-            where: { id: existing.id },
-            data: { email, rollNumber, batchCode, name, department, programme, yearOfStudy, section, isMatched: false, matchedUserId: null }
-          });
-        } else {
-          await prisma.batchAssignment.create({
-            data: { email, rollNumber, batchCode, name, department, programme, yearOfStudy, section, isMatched: false }
-          });
-        }
+        savedAssignment = existingAssignment
+          ? await prisma.batchAssignment.update({
+              where: { id: existingAssignment.id },
+              data: { email, rollNumber, batchCode, name, department, programme, yearOfStudy, section, isMatched: false, matchedUserId: null }
+            })
+          : await prisma.batchAssignment.create({
+              data: { email, rollNumber, batchCode, name, department, programme, yearOfStudy, section, isMatched: false }
+            });
         results.stored++;
       }
+
+      // Keep the in-memory lookup fresh so duplicate email/roll_no rows later in the
+      // same file update this record instead of racing to create a duplicate.
+      if (email) assignmentByEmail.set(email, savedAssignment);
+      if (rollNumber) assignmentByRollNumber.set(rollNumber, savedAssignment);
     } catch (err) {
-      results.errors.push({ row: i + 2, message: err.message });
+      results.errors.push({ row: rowNumber, message: err.message });
       results.skipped++;
     }
   }

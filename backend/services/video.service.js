@@ -1,4 +1,7 @@
+import { StatusCodes } from "http-status-codes";
+
 import { prisma } from "../database/prisma.js";
+import { ApiError } from "../utils/ApiError.js";
 
 // Get all active videos
 export const getAllVideos = async (category = null) => {
@@ -27,7 +30,7 @@ export const getVideoById = async (videoId) => {
   });
 
   if (!video) {
-    throw new Error("Video not found");
+    throw new ApiError(StatusCodes.NOT_FOUND, "Video not found");
   }
 
   return video;

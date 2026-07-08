@@ -60,8 +60,12 @@ export const instructorDashboardController = asyncHandler(async (req, res) => {
 });
 
 export const volunteerDashboardController = asyncHandler(async (req, res) => {
+  if (req.user.role !== "VOLUNTEER") {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Volunteer role required");
+  }
+
   const data = await getVolunteerDashboardData(req.user.id);
-  
+
   res.status(StatusCodes.OK).json({
     success: true,
     data
@@ -69,8 +73,12 @@ export const volunteerDashboardController = asyncHandler(async (req, res) => {
 });
 
 export const associateDashboardController = asyncHandler(async (req, res) => {
+  if (req.user.role !== "ASSOCIATE_INSTRUCTOR") {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Associate instructor role required");
+  }
+
   const data = await getAssociateDashboardData(req.user.id);
-  
+
   res.status(StatusCodes.OK).json({
     success: true,
     data
@@ -91,6 +99,10 @@ export const adminDashboardController = asyncHandler(async (req, res) => {
 });
 
 export const studentBundleProgressController = asyncHandler(async (req, res) => {
+  if (req.user.role !== "STUDENT") {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Student role required");
+  }
+
   const data = await getStudentBundleProgress(req.user.id);
   res.status(StatusCodes.OK).json({ success: true, data });
 });
@@ -104,6 +116,10 @@ export const instructorFeedbackController = asyncHandler(async (req, res) => {
 });
 
 export const volunteerCapacityController = asyncHandler(async (req, res) => {
+  if (req.user.role !== "VOLUNTEER") {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Volunteer role required");
+  }
+
   const data = await getVolunteerCapacity(req.user.id);
   res.status(StatusCodes.OK).json({ success: true, data });
 });

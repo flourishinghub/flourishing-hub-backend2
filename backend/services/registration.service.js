@@ -4,13 +4,22 @@ import { prisma } from "../database/prisma.js";
 import { ApiError } from "../utils/ApiError.js";
 import { sendRegistrationConfirmationEmail, sendCourseBundleEmail } from "./email.service.js";
 import { createNotification } from "./notification.service.js";
+import { recalcCourseEnrolledCount } from "./course.service.js";
+
+// Statuses that no longer occupy a seat — cancelled/no-show registrations should
+// free up capacity rather than counting against it.
+const INACTIVE_REGISTRATION_STATUSES = ["CANCELLED", "NO_SHOW"];
 
 export const registerForEvent = async ({ eventId, asVolunteer }, user) => {
   const event = await prisma.event.findUnique({
     where: { id: eventId },
     include: {
       registrations: { where: { isVolunteer: true }, select: { id: true } },
-      _count: { select: { registrations: true } },
+      _count: {
+        select: {
+          registrations: { where: { status: { notIn: INACTIVE_REGISTRATION_STATUSES } } }
+        }
+      },
       course: { select: { id: true, name: true, code: true, isCompulsory: true } },
       courseModule: { select: { id: true, title: true } }
     }
@@ -72,6 +81,12 @@ export const registerForEvent = async ({ eventId, asVolunteer }, user) => {
       isVolunteer: Boolean(asVolunteer)
     }
   });
+
+  // Keep Course.enrolledCount in sync when this event belongs to a course bundle
+  // (non-blocking — this is a cached count, not a source of truth).
+  if (event.course) {
+    recalcCourseEnrolledCount(event.course.id).catch(() => {});
+  }
 
   // Send confirmation email (non-blocking)
   if (event.course) {

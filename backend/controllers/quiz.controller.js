@@ -1,6 +1,7 @@
 import { StatusCodes } from "http-status-codes";
 import { submitQuizResult, submitFormFeedback } from "../services/quiz.service.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
+import { ApiError } from "../utils/ApiError.js";
 
 export const submitQuizResultController = asyncHandler(async (req, res) => {
   const { email, eventId, score, secret } = req.body;
@@ -12,10 +13,15 @@ export const submitQuizResultController = asyncHandler(async (req, res) => {
     });
   }
 
+  const numericScore = Number(score);
+  if (!Number.isFinite(numericScore) || numericScore < 0 || numericScore > 5) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, "score must be a valid number between 0 and 5");
+  }
+
   const result = await submitQuizResult({
     email,
     eventId,
-    score: Number(score),
+    score: numericScore,
     secret
   });
 

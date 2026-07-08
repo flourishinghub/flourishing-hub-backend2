@@ -1,5 +1,8 @@
 import { prisma } from "../database/prisma.js";
 
+// Statuses that no longer occupy a seat — excluded from "occupied seat" counts.
+const INACTIVE_REGISTRATION_STATUSES = ["CANCELLED", "NO_SHOW", "WAITLISTED"];
+
 const eventCalendarItem = (event) => ({
   id: event.id,
   title: event.title,
@@ -136,7 +139,7 @@ export const getInstructorDashboardData = async (userId) => {
     throw new Error("Instructor profile not found");
   }
 
-  const [assignments, upcomingSessions, pastSessions, allEvents] = await Promise.all([
+  const [assignments, upcomingSessions, pastSessions, allEvents, attendanceRecords] = await Promise.all([
     // Staff Assignments
     prisma.eventStaffAssignment.findMany({
       where: { 
@@ -205,8 +208,21 @@ export const getInstructorDashboardData = async (userId) => {
         modules: true
       },
       orderBy: { startAt: "asc" }
+    }),
+
+    // Real "students impacted" count — distinct students marked PRESENT across
+    // events this instructor is assigned to (replaces the old fabricated
+    // pastSessions.length * 20 placeholder on the frontend)
+    prisma.attendanceRecord.findMany({
+      where: {
+        status: "PRESENT",
+        event: { assignments: { some: { userId, role: "INSTRUCTOR" } } }
+      },
+      select: { userId: true }
     })
   ]);
+
+  const studentsImpacted = new Set(attendanceRecords.map((r) => r.userId)).size;
 
   // Basic Info
   const basicInfo = {
@@ -245,7 +261,8 @@ export const getInstructorDashboardData = async (userId) => {
     basicInfo,
     upcomingSessions: upcomingSessionsData,
     pastSessions: pastSessionsData,
-    calendarData
+    calendarData,
+    studentsImpacted
   };
 };
 
@@ -761,7 +778,9 @@ export const getStudentBundleProgress = async (userId) => {
   ]);
 
   return courses.map((course) => {
-    const total = course.events.length || 4;
+    // A course with no scheduled workshops yet has no meaningful denominator —
+    // report 0/0 rather than fabricating a "4" that doesn't correspond to anything.
+    const total = course.events.length;
     const attended = course.events.filter((e) => attendedIds.has(e.id)).length;
     return {
       courseId: course.id,
@@ -777,7 +796,9 @@ export const getStudentBundleProgress = async (userId) => {
 // INSTRUCTOR FEEDBACK PORTAL API
 export const getInstructorFeedback = async (userId) => {
   const assignments = await prisma.eventStaffAssignment.findMany({
-    where: { userId, role: "INSTRUCTOR" },
+    // Associate instructors run the workshop alongside the lead instructor and should
+    // see feedback for their sessions too — not just users with the INSTRUCTOR role.
+    where: { userId, role: { in: ["INSTRUCTOR", "ASSOCIATE_INSTRUCTOR"] } },
     include: {
       event: {
         include: {
@@ -790,7 +811,11 @@ export const getInstructorFeedback = async (userId) => {
               createdAt: true,
             },
           },
-          _count: { select: { registrations: true } },
+          _count: {
+            select: {
+              registrations: { where: { status: { notIn: INACTIVE_REGISTRATION_STATUSES } } }
+            }
+          },
         },
       },
     },
@@ -832,7 +857,7 @@ export const getVolunteerCapacity = async (userId) => {
         include: {
           _count: {
             select: {
-              registrations: true,
+              registrations: { where: { status: { notIn: INACTIVE_REGISTRATION_STATUSES } } },
             },
           },
         },

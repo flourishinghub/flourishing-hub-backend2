@@ -1,5 +1,8 @@
 import { prisma } from "../database/prisma.js";
 
+// Statuses that no longer occupy a seat — excluded from "occupied seat" / capacity counts.
+const INACTIVE_REGISTRATION_STATUSES = ["CANCELLED", "NO_SHOW", "WAITLISTED"];
+
 // CREATE EVENT
 export const createEvent = async (eventData, createdById) => {
   try {
@@ -308,7 +311,7 @@ export const getEventWithRegistrations = async (eventId) => {
       createdBy: true,
       _count: {
         select: {
-          registrations: true,
+          registrations: { where: { status: { notIn: INACTIVE_REGISTRATION_STATUSES } } },
           attendances: true
         }
       }
@@ -403,7 +406,7 @@ export const getAllEventsWithRegistrations = async (filters = {}) => {
       },
       _count: {
         select: {
-          registrations: true,
+          registrations: { where: { status: { notIn: INACTIVE_REGISTRATION_STATUSES } } },
           assignments: true,
           attendances: true
         }
@@ -497,7 +500,7 @@ export const getEventAnalytics = async (filters = {}) => {
       include: {
         course: { select: { id: true, name: true } },
         courseModule: { select: { id: true, title: true } },
-        _count: { select: { registrations: true } }
+        _count: { select: { registrations: { where: { status: { notIn: INACTIVE_REGISTRATION_STATUSES } } } } }
       },
       orderBy: { startAt: 'desc' },
       take: 10

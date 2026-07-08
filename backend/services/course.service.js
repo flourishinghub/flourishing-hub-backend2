@@ -78,6 +78,30 @@ export const updateCourse = async (courseId, data) => {
   return prisma.course.update({ where: { id: courseId }, data: updateData });
 };
 
+// Recompute Course.enrolledCount as the number of distinct users with an active
+// (non-cancelled, non-no-show) registration across any of the course's events.
+// Called after any enrollment flow touches this course's registrations, so the
+// cached count self-heals rather than relying on scattered increment/decrement calls.
+export const recalcCourseEnrolledCount = async (courseId) => {
+  const events = await prisma.event.findMany({ where: { courseId }, select: { id: true } });
+  const eventIds = events.map((e) => e.id);
+
+  if (eventIds.length === 0) {
+    await prisma.course.update({ where: { id: courseId }, data: { enrolledCount: 0 } });
+    return 0;
+  }
+
+  const distinctEnrolled = await prisma.eventRegistration.groupBy({
+    by: ["userId"],
+    where: { eventId: { in: eventIds }, status: { notIn: ["CANCELLED", "NO_SHOW"] } },
+  });
+
+  await prisma.course.update({ where: { id: courseId }, data: { enrolledCount: distinctEnrolled.length } });
+  return distinctEnrolled.length;
+};
+
+const ENROLL_CHUNK_SIZE = 15;
+
 export const bulkEnrollToCourse = async (courseId, userEmails) => {
   const course = await prisma.course.findUnique({
     where: { id: courseId },
@@ -97,28 +121,77 @@ export const bulkEnrollToCourse = async (courseId, userEmails) => {
     throw new ApiError(StatusCodes.BAD_REQUEST, "Course has no workshops to enroll into");
   }
 
-  const results = { enrolled: 0, skipped: 0, errors: [] };
+  const eventIds = events.map((e) => e.id);
+  const results = { enrolled: 0, skipped: 0, skippedCapacity: 0, errors: [] };
 
-  for (const email of userEmails) {
-    const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
-    if (!user) {
+  // Resolve every user up front in a single query instead of one round-trip per email.
+  const normalizedEmails = [...new Set(userEmails.map((email) => email.toLowerCase()))];
+  const users = await prisma.user.findMany({ where: { email: { in: normalizedEmails } } });
+  const userByEmail = new Map(users.map((u) => [u.email.toLowerCase(), u]));
+
+  for (const email of normalizedEmails) {
+    if (!userByEmail.has(email)) {
       results.errors.push({ email, message: "User not found" });
-      continue;
-    }
-
-    for (const event of events) {
-      try {
-        await prisma.eventRegistration.upsert({
-          where: { eventId_userId: { eventId: event.id, userId: user.id } },
-          create: { eventId: event.id, userId: user.id, status: "REGISTERED" },
-          update: {},
-        });
-        results.enrolled++;
-      } catch {
-        results.skipped++;
-      }
     }
   }
+  const foundUsers = normalizedEmails.map((email) => userByEmail.get(email)).filter(Boolean);
+
+  // Enforce Course.capacity: cap the number of *distinct* students enrolled across
+  // the course's workshops (not the raw registration count). Users already actively
+  // enrolled don't consume additional capacity when re-processed (e.g. re-running a
+  // bulk enroll that includes some already-enrolled emails).
+  let remainingCapacity = Infinity;
+  let alreadyEnrolledIds = new Set();
+  if (course.capacity != null) {
+    const distinctEnrolled = await prisma.eventRegistration.groupBy({
+      by: ["userId"],
+      where: { eventId: { in: eventIds }, status: { notIn: ["CANCELLED", "NO_SHOW"] } },
+    });
+    alreadyEnrolledIds = new Set(distinctEnrolled.map((d) => d.userId));
+    remainingCapacity = Math.max(course.capacity - distinctEnrolled.length, 0);
+  }
+
+  // Process users in reasonably sized parallel batches so we don't overwhelm the
+  // Prisma connection pool while still avoiding N*M fully sequential round-trips.
+  for (let i = 0; i < foundUsers.length; i += ENROLL_CHUNK_SIZE) {
+    const chunk = foundUsers.slice(i, i + ENROLL_CHUNK_SIZE);
+
+    await Promise.all(
+      chunk.map(async (user) => {
+        const countsAgainstCapacity = course.capacity != null && !alreadyEnrolledIds.has(user.id);
+
+        if (countsAgainstCapacity) {
+          if (remainingCapacity <= 0) {
+            results.skippedCapacity += events.length;
+            return;
+          }
+          remainingCapacity -= 1;
+        }
+
+        try {
+          // One transaction per user: either all of their workshop registrations for
+          // this course are written, or none are (atomic per-user enrollment).
+          await prisma.$transaction(
+            events.map((event) =>
+              prisma.eventRegistration.upsert({
+                where: { eventId_userId: { eventId: event.id, userId: user.id } },
+                create: { eventId: event.id, userId: user.id, status: "REGISTERED" },
+                // Re-enrolling a previously CANCELLED/NO_SHOW registration must actually
+                // flip it back to an active status, not leave it untouched.
+                update: { status: "REGISTERED" },
+              })
+            )
+          );
+          results.enrolled += events.length;
+        } catch (err) {
+          results.skipped += events.length;
+          results.errors.push({ email: user.email, message: err.message });
+        }
+      })
+    );
+  }
+
+  await recalcCourseEnrolledCount(courseId);
 
   return { courseId, courseName: course.name, workshopCount: events.length, ...results };
 };
@@ -142,19 +215,47 @@ export const selfEnrollToCourse = async (courseId, userId) => {
   const events = course.events;
   if (events.length === 0) throw new ApiError(StatusCodes.BAD_REQUEST, 'Course has no workshops to enroll into');
 
-  let enrolled = 0, skipped = 0;
-  for (const event of events) {
-    try {
-      await prisma.eventRegistration.upsert({
-        where: { eventId_userId: { eventId: event.id, userId } },
-        create: { eventId: event.id, userId, status: 'REGISTERED' },
-        update: {},
-      });
-      enrolled++;
-    } catch {
-      skipped++;
+  const eventIds = events.map((e) => e.id);
+
+  // Enforce Course.capacity: cap the number of distinct students enrolled across
+  // the course's workshops. A student who is already actively enrolled (e.g. via a
+  // prior partial enrollment) is allowed to re-run this without being blocked by
+  // their own existing seat.
+  if (course.capacity != null) {
+    const distinctEnrolled = await prisma.eventRegistration.groupBy({
+      by: ['userId'],
+      where: {
+        eventId: { in: eventIds },
+        status: { notIn: ['CANCELLED', 'NO_SHOW'] },
+        userId: { not: userId },
+      },
+    });
+    if (distinctEnrolled.length >= course.capacity) {
+      throw new ApiError(StatusCodes.CONFLICT, 'Course capacity has been reached');
     }
   }
+
+  let enrolled = 0, skipped = 0;
+  try {
+    // Single transaction: either every workshop registration for this course is
+    // written, or none are (atomic enrollment for this student).
+    await prisma.$transaction(
+      events.map((event) =>
+        prisma.eventRegistration.upsert({
+          where: { eventId_userId: { eventId: event.id, userId } },
+          create: { eventId: event.id, userId, status: 'REGISTERED' },
+          // Re-enrolling a previously CANCELLED/NO_SHOW registration must flip it
+          // back to an active status, not leave it untouched.
+          update: { status: 'REGISTERED' },
+        })
+      )
+    );
+    enrolled = events.length;
+  } catch {
+    skipped = events.length;
+  }
+
+  await recalcCourseEnrolledCount(courseId);
 
   return { courseId, courseName: course.name, workshopCount: events.length, enrolled, skipped };
 };

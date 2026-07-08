@@ -52,7 +52,7 @@ export const createVideoController = asyncHandler(async (req, res) => {
     });
   }
 
-  const video = await createVideo(req.body);
+  const video = await createVideo(req.validated.body);
 
   res.status(StatusCodes.CREATED).json({
     success: true,
@@ -71,8 +71,8 @@ export const updateVideoController = asyncHandler(async (req, res) => {
     });
   }
 
-  const { videoId } = req.params;
-  const video = await updateVideo(videoId, req.body);
+  const { videoId } = req.validated.params;
+  const video = await updateVideo(videoId, req.validated.body);
 
   res.status(StatusCodes.OK).json({
     success: true,
