@@ -114,14 +114,18 @@ const combineDateAndTime = (dateValue, timeValue) => {
     return new Date(Date.UTC(year, month, day, directDate.getUTCHours(), directDate.getUTCMinutes()));
   }
 
-  const match = normalizedTime.match(/^(\d{1,2})(?::|\.)?(\d{2})?\s*(am|pm)?$/i);
+  // Optional trailing `:SS` group so times rendered with seconds (a common
+  // Excel time-cell display format, e.g. "10:00:00 AM") still match — without
+  // it, any time value that included seconds fell straight through to the
+  // no-match branch below and silently dropped the time to midnight.
+  const match = normalizedTime.match(/^(\d{1,2})(?::|\.)?(\d{2})?(?::(\d{2}))?\s*(am|pm)?$/i);
   if (!match) {
     return new Date(Date.UTC(year, month, day));
   }
 
   let hours = Number(match[1]);
   const minutes = Number(match[2] || 0);
-  const meridiem = match[3];
+  const meridiem = match[4];
 
   if (meridiem === "pm" && hours < 12) {
     hours += 12;
@@ -194,6 +198,9 @@ const mapScheduleRowToEventPayload = (row, meta = {}) => {
     courseId: normalizeString(meta.courseId) || undefined,
     courseModuleId: normalizeString(meta.courseModuleId) || undefined,
     batch: tutorial || undefined,
+    // Not consumed by createEvent — carried through for the frontend preview
+    // table so it can show it as its own column.
+    instructor: instructor || undefined,
   };
 };
 
@@ -233,6 +240,10 @@ const mapScheduleRowWithModule = (row, module, meta = {}) => {
     courseId: meta.courseId || undefined,
     courseModuleId: meta.courseModuleId || undefined,
     batch: batch || undefined,
+    // Not consumed by createEvent (which only reads recognized keys) — carried
+    // through purely so the frontend preview table can show it as its own
+    // column instead of it only being buried inside the description text.
+    instructor: instructor || undefined,
     isCampusWide: true,
     allowVolunteerSignup: true,
     requiresCheckIn: true,

@@ -404,6 +404,9 @@ export const getAllEventsWithRegistrations = async (filters = {}) => {
       modules: {
         orderBy: { startAt: 'asc' }
       },
+      feedbackEntries: {
+        select: { eventRating: true, instructorRating: true }
+      },
       _count: {
         select: {
           registrations: { where: { status: { notIn: INACTIVE_REGISTRATION_STATUSES } } },
@@ -415,9 +418,18 @@ export const getAllEventsWithRegistrations = async (filters = {}) => {
     orderBy: { startAt: 'desc' }
   });
 
+  const average = (values) => values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
+
   return events.map(event => ({
     ...event,
     attendedCount: event._count.attendances,
+    // Average student ratings from Feedback — instructorRating is optional per
+    // submission, so it's averaged separately and falls back to the overall
+    // event rating when no student rated the instructor specifically.
+    avgEventRating: average(event.feedbackEntries.map(f => f.eventRating)),
+    avgInstructorRating: average(event.feedbackEntries.filter(f => f.instructorRating != null).map(f => f.instructorRating))
+      ?? average(event.feedbackEntries.map(f => f.eventRating)),
+    feedbackCount: event.feedbackEntries.length,
     registrations: event.registrations.map(reg => ({
       id: reg.id,
       registeredAt: reg.registeredAt,
@@ -615,6 +627,7 @@ export const getWorkshopAnalyticsTable = async () => {
       const spId = reg.user.studentProfile?.id;
       const progress = spId ? progressMap[spId] : null;
       return {
+        userId: reg.userId,
         name: reg.user.name,
         email: reg.user.email,
         rollNo: reg.user.studentProfile?.rollNumber || "—",
