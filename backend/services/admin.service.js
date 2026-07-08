@@ -540,8 +540,17 @@ export const getEventAnalytics = async (filters = {}) => {
 
 // WORKSHOP ANALYTICS TABLE (past workshops with full details)
 export const getWorkshopAnalyticsTable = async () => {
+  // Treat an event as "completed" for analytics purposes either because an admin
+  // explicitly marked it COMPLETED, or because its end time has already passed —
+  // otherwise this table (and the Course dropdown derived from it) stays empty
+  // forever unless every event is manually flipped to COMPLETED first.
   const events = await prisma.event.findMany({
-    where: { status: "COMPLETED" },
+    where: {
+      OR: [
+        { status: "COMPLETED" },
+        { status: "PUBLISHED", endAt: { lt: new Date() } }
+      ]
+    },
     include: {
       course: { select: { id: true, name: true } },
       courseModule: { select: { id: true, title: true } },
