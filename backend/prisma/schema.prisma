@@ -28,6 +28,7 @@ enum Programme {
   PHD
   MSC
   MA
+  DUAL_DEGREE
   OTHER
 }
 

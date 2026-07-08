@@ -27,6 +27,18 @@ const start = async () => {
     await prisma.$connect();
     console.log("Database connection established");
 
+    // Self-healing schema patch: adds the DUAL_DEGREE Programme enum value if
+    // missing. Idempotent (IF NOT EXISTS) and safe to run on every boot —
+    // works around `prisma db push` being unreachable from some networks
+    // (Supabase's direct-connection host is IPv6-only there).
+    try {
+      await prisma.$executeRawUnsafe(
+        `ALTER TYPE "Programme" ADD VALUE IF NOT EXISTS 'DUAL_DEGREE'`
+      );
+    } catch (err) {
+      console.error("Failed to ensure DUAL_DEGREE enum value exists:", err.message);
+    }
+
     server = app.listen(env.PORT, () => {
       console.log(`${env.APP_NAME} listening on port ${env.PORT}`);
     });
