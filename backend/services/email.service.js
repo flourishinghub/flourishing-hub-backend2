@@ -9,7 +9,10 @@ const createTransporter = () => {
     console.warn("Email credentials not configured. Email sending will be skipped.");
     return null;
   }
-  
+
+  const maskedUser = process.env.EMAIL_USER.replace(/^(.{3}).*(@.*)$/, "$1***$2");
+  console.log(`Email transporter configured for ${maskedUser} (app password length: ${process.env.EMAIL_PASSWORD.length} chars)`);
+
   return nodemailer.createTransport({
     service: "gmail",
     auth: {
@@ -595,7 +598,8 @@ export const sendPasswordResetEmail = async (email, name, resetLink) => {
         </html>
       `
     };
-    await transporter.sendMail(mailOptions);
+    const info = await transporter.sendMail(mailOptions);
+    console.log(`Password reset email accepted by SMTP server for ${email}: messageId=${info.messageId} response="${info.response}"`);
     return true;
   } catch (error) {
     console.error("Error sending password reset email:", error);
