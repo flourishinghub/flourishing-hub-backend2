@@ -87,26 +87,36 @@ const normalizeDate = (value) => {
   return Number.isNaN(parsed.getTime()) ? undefined : parsed;
 };
 
+// NOTE: dateValue may arrive as a plain date string (e.g. "2026-05-10", parsed by
+// `new Date()` as UTC midnight) or as a native Date object from an Excel cell (exceljs
+// constructs these at local midnight). Reading the calendar date back out via the UTC
+// getters — and rebuilding the combined timestamp with Date.UTC — keeps both cases on
+// the same clock instead of mixing a UTC-parsed date with a locally-set time, which was
+// silently shifting bulk-imported event times by the server/client's UTC offset.
 const combineDateAndTime = (dateValue, timeValue) => {
   const baseDate = normalizeDate(dateValue);
   if (!baseDate) {
     return undefined;
   }
 
+  const year = baseDate.getUTCFullYear();
+  const month = baseDate.getUTCMonth();
+  const day = baseDate.getUTCDate();
+
   if (timeValue === undefined || timeValue === null || timeValue === "") {
-    return baseDate;
+    return new Date(Date.UTC(year, month, day));
   }
 
   const normalizedTime = String(timeValue).trim().toLowerCase();
   const directDate = normalizeDate(timeValue);
 
   if (directDate && directDate.getFullYear() > 1900) {
-    return directDate;
+    return new Date(Date.UTC(year, month, day, directDate.getUTCHours(), directDate.getUTCMinutes()));
   }
 
   const match = normalizedTime.match(/^(\d{1,2})(?::|\.)?(\d{2})?\s*(am|pm)?$/i);
   if (!match) {
-    return baseDate;
+    return new Date(Date.UTC(year, month, day));
   }
 
   let hours = Number(match[1]);
@@ -120,9 +130,7 @@ const combineDateAndTime = (dateValue, timeValue) => {
     hours = 0;
   }
 
-  const combined = new Date(baseDate);
-  combined.setHours(hours, minutes, 0, 0);
-  return combined;
+  return new Date(Date.UTC(year, month, day, hours, minutes));
 };
 
 const mapScheduleRowToEventPayload = (row, meta = {}) => {
@@ -134,6 +142,7 @@ const mapScheduleRowToEventPayload = (row, meta = {}) => {
   );
   const sessionDate = getRowValue(row, ["sessionDate", "Session- Date", "date"]);
   const sessionTime = getRowValue(row, ["time", "sessionTime"]);
+  const sessionEndTime = getRowValue(row, ["endTime", "end time", "End Time"]);
   const durationHours = normalizeNumber(
     getRowValue(row, ["duration", "Duration (hrs)", "Duration"])
   );
@@ -149,7 +158,9 @@ const mapScheduleRowToEventPayload = (row, meta = {}) => {
 
   const startAt = combineDateAndTime(sessionDate, sessionTime);
   const endAt = startAt
-    ? new Date(startAt.getTime() + Math.round((durationHours || 1) * 60) * 60 * 1000)
+    ? sessionEndTime
+      ? combineDateAndTime(sessionDate, sessionEndTime)
+      : new Date(startAt.getTime() + Math.round((durationHours || 1) * 60) * 60 * 1000)
     : undefined;
 
   if (!courseName || !startAt || !endAt) {
@@ -190,6 +201,7 @@ const mapScheduleRowToEventPayload = (row, meta = {}) => {
 const mapScheduleRowWithModule = (row, module, meta = {}) => {
   const sessionDate = getRowValue(row, ["date", "sessionDate", "Session- Date"]);
   const sessionTime = getRowValue(row, ["time", "sessionTime"]);
+  const sessionEndTime = getRowValue(row, ["endTime", "end time", "End Time"]);
   const durationHours = normalizeNumber(getRowValue(row, ["duration", "Duration (hrs)", "Duration"]));
   const venue = normalizeString(getRowValue(row, ["venue", "location"]));
   const instructor = normalizeString(getRowValue(row, ["instructor", "faculty"]));
@@ -198,7 +210,9 @@ const mapScheduleRowWithModule = (row, module, meta = {}) => {
   const startAt = combineDateAndTime(sessionDate, sessionTime);
   if (!startAt) return null;
 
-  const endAt = new Date(startAt.getTime() + Math.round((durationHours || 2) * 60) * 60 * 1000);
+  const endAt = sessionEndTime
+    ? combineDateAndTime(sessionDate, sessionEndTime)
+    : new Date(startAt.getTime() + Math.round((durationHours || 2) * 60) * 60 * 1000);
 
   const title = module?.title || normalizeString(getRowValue(row, ["workshop name", "workshopName", "title"])) || "Workshop";
   const descriptionParts = [

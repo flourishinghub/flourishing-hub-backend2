@@ -118,3 +118,42 @@ export const submitQuizResult = async ({ email, eventId, score, secret }) => {
     passed
   };
 };
+
+// Webhook counterpart of the in-app star-rating flow (services/operation.service.js:submitFeedback),
+// but driven by a Google Form response instead of the student UI. Used for both compulsory workshops
+// (rating alongside the quiz score above) and optional workshops (rating only, no quiz/pass threshold).
+export const submitFormFeedback = async ({ email, eventId, eventRating, instructorRating, eventComment, instructorComment, secret }) => {
+  const expectedSecret = process.env.QUIZ_WEBHOOK_SECRET;
+  if (!expectedSecret || secret !== expectedSecret) {
+    throw new ApiError(StatusCodes.UNAUTHORIZED, "Invalid webhook secret");
+  }
+
+  const user = await prisma.user.findUnique({ where: { email: email.trim().toLowerCase() } });
+  if (!user) throw new ApiError(StatusCodes.NOT_FOUND, `No user found with email: ${email}`);
+
+  const registration = await prisma.eventRegistration.findUnique({
+    where: { eventId_userId: { eventId, userId: user.id } }
+  });
+  if (!registration) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, "This user is not registered for the given event");
+  }
+
+  if (!eventRating || eventRating < 1 || eventRating > 5) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, "eventRating must be an integer between 1 and 5");
+  }
+
+  const payload = {
+    eventRating: Number(eventRating),
+    ...(instructorRating !== undefined && instructorRating !== null ? { instructorRating: Number(instructorRating) } : {}),
+    ...(eventComment ? { eventComment } : {}),
+    ...(instructorComment ? { instructorComment } : {}),
+  };
+
+  const feedback = await prisma.feedback.upsert({
+    where: { eventId_userId: { eventId, userId: user.id } },
+    update: payload,
+    create: { eventId, userId: user.id, ...payload }
+  });
+
+  return { studentName: user.name, email: user.email, eventId, feedbackId: feedback.id, eventRating: feedback.eventRating };
+};

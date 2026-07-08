@@ -168,6 +168,16 @@ export const getBatchAssignmentStats = async () => {
   };
 };
 
+export const listBatchAssignments = async ({ batchCode, isMatched } = {}) => {
+  return prisma.batchAssignment.findMany({
+    where: {
+      ...(batchCode ? { batchCode } : {}),
+      ...(isMatched !== undefined ? { isMatched } : {}),
+    },
+    orderBy: [{ batchCode: 'asc' }, { name: 'asc' }],
+  });
+};
+
 export const downloadBatchTemplate = async () => {
   return createWorkbookBuffer([{
     name: "Batch Assignment",

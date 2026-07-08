@@ -3,6 +3,7 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import {
   uploadBatchAssignment,
   getBatchAssignmentStats,
+  listBatchAssignments,
   downloadBatchTemplate
 } from "../services/batchAssignment.service.js";
 
@@ -22,6 +23,15 @@ export const uploadBatchAssignmentController = asyncHandler(async (req, res) => 
 export const getBatchStatsController = asyncHandler(async (_req, res) => {
   const stats = await getBatchAssignmentStats();
   res.status(StatusCodes.OK).json({ success: true, data: stats });
+});
+
+export const listBatchAssignmentsController = asyncHandler(async (req, res) => {
+  const { batchCode, isMatched } = req.query;
+  const data = await listBatchAssignments({
+    batchCode: batchCode || undefined,
+    isMatched: isMatched === undefined ? undefined : isMatched === 'true',
+  });
+  res.status(StatusCodes.OK).json({ success: true, data });
 });
 
 export const downloadTemplateController = asyncHandler(async (_req, res) => {

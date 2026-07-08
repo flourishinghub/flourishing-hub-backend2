@@ -21,7 +21,7 @@ export const registerSchema = z.object({
         rollNumber: z.string().min(3).max(30),
         department: z.string().min(2).max(80),
         yearOfStudy: z.coerce.number().int().min(1).max(10),
-        programme: z.enum(["BTECH", "MTECH", "PHD", "MSC", "MA", "OTHER"]),
+        programme: z.enum(["BTECH", "MTECH", "PHD", "MSC", "MA", "DUAL DEGREE", "OTHER"]),
         section: z.string().max(40).optional(),
         cohort: z.string().max(40).optional()
       })
