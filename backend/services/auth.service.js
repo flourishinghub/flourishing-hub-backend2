@@ -102,8 +102,15 @@ export const register = async (payload) => {
   }
 
   if (isIITBEmail) {
-    // IITB email: Send OTP for verification
-    await createAndSendOTP(user.id, user.email, user.name);
+    // IITB email: send OTP for verification, but don't let a failed send (SMTP
+    // outage, expired app password, etc.) fail the whole registration — the
+    // user is already created above, so throwing here would return an error
+    // to the student while leaving them stuck: signup "failed" yet retrying
+    // with the same email now says "already registered". The verify-email
+    // page's Resend OTP button covers getting a working code afterward.
+    await createAndSendOTP(user.id, user.email, user.name).catch((err) => {
+      console.error("OTP email failed during registration:", err.message);
+    });
 
     return {
       userId: user.id,
