@@ -813,13 +813,21 @@ export const getStudentBundleProgress = async (userId) => {
       let pendingWorkshops = [];
       if (course.isCompulsory) {
         const studentBatch = myWorkshops.find((w) => w.batch)?.batch ?? null;
+        const relevantEvents = course.events.filter((e) => e.batch === studentBatch || !e.batch);
         const scheduledModuleIds = new Set(
-          course.events
-            .filter((e) => e.courseModuleId && (e.batch === studentBatch || !e.batch))
-            .map((e) => e.courseModuleId)
+          relevantEvents.filter((e) => e.courseModuleId).map((e) => e.courseModuleId)
+        );
+        // Events created outside the module-based flow (e.g. a plain bulk
+        // schedule import) never get a courseModuleId, so a module can only
+        // be "already scheduled" via that link when one was actually set —
+        // fall back to matching the event's title against the module's
+        // title, otherwise a module whose event skipped that link shows up
+        // as a duplicate "Pending Schedule" entry alongside the real one.
+        const scheduledTitles = new Set(
+          relevantEvents.map((e) => (e.title || "").trim().toLowerCase()).filter(Boolean)
         );
         pendingWorkshops = course.modules
-          .filter((m) => !scheduledModuleIds.has(m.id))
+          .filter((m) => !scheduledModuleIds.has(m.id) && !scheduledTitles.has((m.title || "").trim().toLowerCase()))
           .map((m) => ({ id: m.id, title: m.title }));
       }
 
