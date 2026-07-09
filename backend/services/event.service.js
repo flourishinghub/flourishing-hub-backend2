@@ -156,8 +156,38 @@ export const createEvent = async (payload, createdById) => {
   return event;
 };
 
-export const listEvents = async (query) => {
+export const listEvents = async (query, user) => {
   const pagination = buildPagination(query.page, query.limit);
+
+  // Combined via AND below (not spread directly into `where`) because both
+  // conditions use the "OR" key — spreading two OR-keyed objects into one
+  // literal would let the second silently clobber the first.
+  const andConditions = [];
+
+  // Batch filter: if batch param provided, show events with no batch OR matching batch.
+  // Case-insensitive to match autoRegisterBatch's cohort comparison (import.service.js) —
+  // otherwise a student auto-registered via a differently-cased batch code (e.g. admin
+  // typed "D1T1", cohort stored as "d1t1") never sees the event in their own events list.
+  if (query.batch !== undefined) {
+    andConditions.push({
+      OR: [{ batch: null }, ...(query.batch ? [{ batch: { equals: query.batch, mode: "insensitive" } }] : [])]
+    });
+  }
+
+  // A batch-scoped workshop (event.batch set) belongs to whichever batch it
+  // was scheduled for — a student should only ever see/register/check into
+  // their own batch's copy, not every other batch's copy of the same
+  // workshop title. Rather than trying to resolve "the student's batch for
+  // this course" (a student's real batch is only known per-course via
+  // BatchAssignment, not the single flattened StudentProfile.cohort field),
+  // this uses what's already authoritative: they're already registered for
+  // it (via the correct course+batch-scoped auto-registration). Events with
+  // no batch (open enrollment) are unaffected.
+  if (user?.role === "STUDENT") {
+    andConditions.push({
+      OR: [{ batch: null }, { registrations: { some: { userId: user.id } } }]
+    });
+  }
 
   const where = {
     status: query.status || "PUBLISHED",
@@ -181,13 +211,7 @@ export const listEvents = async (query) => {
           }
         }
       : {}),
-    // Batch filter: if batch param provided, show events with no batch OR matching batch.
-    // Case-insensitive to match autoRegisterBatch's cohort comparison (import.service.js) —
-    // otherwise a student auto-registered via a differently-cased batch code (e.g. admin
-    // typed "D1T1", cohort stored as "d1t1") never sees the event in their own events list.
-    ...(query.batch !== undefined
-      ? { OR: [{ batch: null }, ...(query.batch ? [{ batch: { equals: query.batch, mode: "insensitive" } }] : [])] }
-      : {})
+    ...(andConditions.length ? { AND: andConditions } : {})
   };
 
   const [items, total] = await Promise.all([

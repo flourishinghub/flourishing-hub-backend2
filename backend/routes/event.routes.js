@@ -19,7 +19,7 @@ import {
   assignVolunteerController,
   unassignVolunteerController
 } from "../controllers/event.controller.js";
-import { authenticate } from "../middleware/auth.js";
+import { authenticate, authenticateOptional } from "../middleware/auth.js";
 import { authorize } from "../middleware/authorize.js";
 import { cacheResponse } from "../middleware/cacheResponse.js";
 import { validate } from "../middleware/validate.js";
@@ -48,7 +48,7 @@ eventRoutes.post(
   validate(bulkCreateEventSchema),
   bulkCreateEventsController
 );
-eventRoutes.get("/", validate(listEventSchema), listEventsController);
+eventRoutes.get("/", authenticateOptional, validate(listEventSchema), listEventsController);
 eventRoutes.get("/:eventId/record", authenticate, authorize("ADMIN"), getEventRecordController);
 eventRoutes.get("/:eventId/export", authenticate, authorize("ADMIN"), exportEventDataController);
 eventRoutes.get("/:eventId/volunteers", authenticate, authorize("ADMIN"), getEventVolunteersController);

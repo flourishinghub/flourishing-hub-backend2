@@ -29,6 +29,27 @@ export const registerForEvent = async ({ eventId, asVolunteer }, user) => {
     throw new ApiError(StatusCodes.NOT_FOUND, "Event is not available for registration");
   }
 
+  // A batch-scoped compulsory workshop only belongs to the batch it was
+  // scheduled for. GET /events already hides other batches' copies from a
+  // student's list, but that alone doesn't stop a direct call with a known
+  // eventId — this is the actual gate. Checked against BatchAssignment
+  // (course+batch scoped) rather than the single flattened
+  // StudentProfile.cohort, which can't tell two different courses' batches
+  // apart for the same student.
+  if (event.batch && event.registrationMode === "COMPULSORY" && user.role === "STUDENT" && event.course) {
+    const belongsToBatch = await prisma.batchAssignment.findFirst({
+      where: {
+        courseId: event.course.id,
+        batchCode: { equals: event.batch, mode: "insensitive" },
+        matchedUserId: user.id
+      },
+      select: { id: true }
+    });
+    if (!belongsToBatch) {
+      throw new ApiError(StatusCodes.FORBIDDEN, "This workshop belongs to a different batch — contact admin if you believe this is an error.");
+    }
+  }
+
   // Registration stays open until 15 minutes after the event starts, then closes.
   const REGISTRATION_GRACE_MS = 15 * 60 * 1000;
   const registrationDeadline = new Date(new Date(event.startAt).getTime() + REGISTRATION_GRACE_MS);

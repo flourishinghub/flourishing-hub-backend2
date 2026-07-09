@@ -32,7 +32,7 @@ export const bulkCreateEventsController = asyncHandler(async (req, res) => {
 });
 
 export const listEventsController = asyncHandler(async (req, res) => {
-  const data = await listEvents(req.validated.query);
+  const data = await listEvents(req.validated.query, req.user);
   res.status(StatusCodes.OK).json({
     success: true,
     data

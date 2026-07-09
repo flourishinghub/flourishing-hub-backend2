@@ -36,5 +36,40 @@ export const authenticate = asyncHandler(async (req, _res, next) => {
   }
 });
 
+// Same as authenticate, but for public routes that still want to know who
+// the caller is when a valid token happens to be sent (e.g. GET /events, so
+// a logged-in student's batch-scoped visibility can be applied) — never
+// rejects the request; just proceeds with no req.user if the token is
+// missing, expired, or invalid.
+export const authenticateOptional = asyncHandler(async (req, _res, next) => {
+  const header = req.headers.authorization;
+  const token = header?.startsWith("Bearer ") ? header.split(" ")[1] : null;
+
+  if (!token) {
+    return next();
+  }
+
+  try {
+    const payload = verifyAccessToken(token);
+    const user = await prisma.user.findUnique({
+      where: payload.sub ? { id: payload.sub } : { email: payload.email },
+      include: {
+        studentProfile: true,
+        instructorProfile: true,
+        adminProfile: true
+      }
+    });
+
+    if (user?.isActive) {
+      req.user = user;
+      req.frontendRole = typeof payload.frontendRole === "string" ? payload.frontendRole : undefined;
+    }
+  } catch {
+    // Invalid/expired token on a public route — proceed unauthenticated.
+  }
+
+  next();
+});
+
 
 
