@@ -468,6 +468,7 @@ model Course {
 
   modules            CourseModule[]
   events             Event[]       @relation("EventCourse")
+  batchAssignments   BatchAssignment[]
 
   @@index([status])
   @@index([startDate])
@@ -504,13 +505,17 @@ model BatchAssignment {
   programme     String?
   yearOfStudy   Int?
   section       String?
+  courseId      String?
   isMatched     Boolean  @default(false)
   matchedUserId String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
+  course        Course?  @relation(fields: [courseId], references: [id], onDelete: SetNull)
+
   @@index([email])
   @@index([rollNumber])
   @@index([batchCode])
   @@index([isMatched])
+  @@index([courseId])
 }

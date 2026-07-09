@@ -14,22 +14,25 @@ export const uploadBatchAssignmentController = asyncHandler(async (req, res) => 
 
   const result = await uploadBatchAssignment({
     fileBuffer: req.file.buffer,
-    fileName: req.file.originalname
+    fileName: req.file.originalname,
+    courseId: req.body.courseId,
+    resolutionMode: req.body.resolutionMode
   });
 
   res.status(StatusCodes.OK).json({ success: true, data: result });
 });
 
-export const getBatchStatsController = asyncHandler(async (_req, res) => {
-  const stats = await getBatchAssignmentStats();
+export const getBatchStatsController = asyncHandler(async (req, res) => {
+  const stats = await getBatchAssignmentStats(req.query.courseId || undefined);
   res.status(StatusCodes.OK).json({ success: true, data: stats });
 });
 
 export const listBatchAssignmentsController = asyncHandler(async (req, res) => {
-  const { batchCode, isMatched } = req.query;
+  const { batchCode, isMatched, courseId } = req.query;
   const data = await listBatchAssignments({
     batchCode: batchCode || undefined,
     isMatched: isMatched === undefined ? undefined : isMatched === 'true',
+    courseId: courseId || undefined,
   });
   res.status(StatusCodes.OK).json({ success: true, data });
 });
