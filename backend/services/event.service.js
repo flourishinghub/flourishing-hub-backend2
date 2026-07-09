@@ -7,6 +7,7 @@ import { createWorkbookBuffer } from "../utils/excel.js";
 import { buildPagination } from "../utils/pagination.js";
 import { slugify } from "../utils/slugify.js";
 import { cascadeBundleRegistrationForNewEvent } from "./course.service.js";
+import { normalizeBatch } from "../utils/normalizeBatch.js";
 
 const parseRegistrationNotes = (notes) => {
   if (!notes) {
@@ -115,7 +116,7 @@ export const createEvent = async (payload, createdById) => {
       templateId: payload.templateId,
       courseId: payload.courseId || undefined,
       courseModuleId: payload.courseModuleId || undefined,
-      batch: payload.batch || undefined,
+      batch: normalizeBatch(payload.batch),
       registrationMode: payload.registrationMode || undefined,
       createdById,
       modules: templateModules.length
@@ -174,18 +175,28 @@ export const listEvents = async (query, user) => {
     });
   }
 
-  // A batch-scoped workshop (event.batch set) belongs to whichever batch it
-  // was scheduled for — a student should only ever see/register/check into
-  // their own batch's copy, not every other batch's copy of the same
+  // A batch-scoped COMPULSORY workshop under a course (event.batch set,
+  // courseId set, registrationMode COMPULSORY) belongs to whichever batch
+  // it was scheduled for — a student should only ever see/register/check
+  // into their own batch's copy, not every other batch's copy of the same
   // workshop title. Rather than trying to resolve "the student's batch for
   // this course" (a student's real batch is only known per-course via
   // BatchAssignment, not the single flattened StudentProfile.cohort field),
   // this uses what's already authoritative: they're already registered for
-  // it (via the correct course+batch-scoped auto-registration). Events with
-  // no batch (open enrollment) are unaffected.
+  // it (via the correct course+batch-scoped auto-registration).
+  //
+  // Deliberately scoped to courseId+COMPULSORY only — `batch` is a bare
+  // free-text field, also used on standalone/open workshops just as a
+  // descriptive tag (e.g. "Btech") with no real BatchAssignment behind it.
+  // Restricting on batch alone previously hid those from every student.
   if (user?.role === "STUDENT") {
     andConditions.push({
-      OR: [{ batch: null }, { registrations: { some: { userId: user.id } } }]
+      OR: [
+        { batch: null },
+        { courseId: null },
+        { registrationMode: { not: "COMPULSORY" } },
+        { registrations: { some: { userId: user.id } } }
+      ]
     });
   }
 

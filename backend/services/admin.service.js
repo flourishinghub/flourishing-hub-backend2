@@ -1,6 +1,7 @@
 import { prisma } from "../database/prisma.js";
 import { ApiError } from "../utils/ApiError.js";
 import { StatusCodes } from "http-status-codes";
+import { normalizeBatch } from "../utils/normalizeBatch.js";
 
 // Statuses that no longer occupy a seat — excluded from "occupied seat" / capacity counts.
 const INACTIVE_REGISTRATION_STATUSES = ["CANCELLED", "NO_SHOW", "WAITLISTED"];
@@ -26,6 +27,7 @@ export const createEvent = async (eventData, createdById) => {
     const event = await prisma.event.create({
       data: {
         ...eventData,
+        batch: normalizeBatch(eventData.batch),
         startAt,
         endAt,
         createdById,
@@ -48,6 +50,10 @@ export const createEvent = async (eventData, createdById) => {
 // MODIFY EVENT
 export const modifyEvent = async (eventId, eventData, updatedById) => {
   const { instructorId, associateInstructorId, ...eventFields } = eventData;
+
+  if ("batch" in eventFields) {
+    eventFields.batch = normalizeBatch(eventFields.batch);
+  }
 
   // Guard: if endAt equals or precedes startAt, default to startAt + 2 hours
   if (eventFields.startAt && eventFields.endAt) {
@@ -477,6 +483,7 @@ export const createEventFromModule = async (moduleId, eventData, createdById) =>
   return prisma.event.create({
     data: {
       ...eventData,
+      batch: normalizeBatch(eventData.batch),
       courseId: module.courseId,
       courseModuleId: moduleId,
       createdById,
