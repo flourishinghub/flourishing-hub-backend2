@@ -6,6 +6,7 @@ import { toCsv } from "../utils/csv.js";
 import { createWorkbookBuffer } from "../utils/excel.js";
 import { buildPagination } from "../utils/pagination.js";
 import { slugify } from "../utils/slugify.js";
+import { cascadeBundleRegistrationForNewEvent } from "./course.service.js";
 
 const parseRegistrationNotes = (notes) => {
   if (!notes) {
@@ -146,6 +147,11 @@ export const createEvent = async (payload, createdById) => {
       skipDuplicates: true,
     });
   }
+
+  // COMPULSORY BUNDLE courses: any student already registered in another
+  // workshop of this same course + batch belongs in this newly scheduled
+  // one too (no-op for non-course or non-compulsory events).
+  cascadeBundleRegistrationForNewEvent(event.id).catch(() => {});
 
   return event;
 };

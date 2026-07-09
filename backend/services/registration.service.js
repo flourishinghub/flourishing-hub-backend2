@@ -4,7 +4,7 @@ import { prisma } from "../database/prisma.js";
 import { ApiError } from "../utils/ApiError.js";
 import { sendRegistrationConfirmationEmail, sendCourseBundleEmail } from "./email.service.js";
 import { createNotification } from "./notification.service.js";
-import { recalcCourseEnrolledCount } from "./course.service.js";
+import { recalcCourseEnrolledCount, cascadeBundleRegistrationForStudent } from "./course.service.js";
 
 // Statuses that no longer occupy a seat — cancelled/no-show registrations should
 // free up capacity rather than counting against it.
@@ -86,6 +86,14 @@ export const registerForEvent = async ({ eventId, asVolunteer }, user) => {
   // (non-blocking — this is a cached count, not a source of truth).
   if (event.course) {
     recalcCourseEnrolledCount(event.course.id).catch(() => {});
+  }
+
+  // COMPULSORY BUNDLE courses are all-or-nothing: registering for one
+  // workshop registers you for every other already-scheduled workshop of
+  // the same course + batch too (matches the "enrolled in all workshops"
+  // promise already made in the notification below).
+  if (event.course?.isCompulsory) {
+    cascadeBundleRegistrationForStudent(user.id, eventId).catch(() => {});
   }
 
   // Send confirmation email (non-blocking)

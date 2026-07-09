@@ -761,8 +761,13 @@ export const getStudentBundleProgress = async (userId) => {
       include: {
         events: {
           where: { status: { in: ["PUBLISHED", "COMPLETED"] } },
-          select: { id: true, title: true, startAt: true },
+          select: { id: true, title: true, startAt: true, batch: true, courseModuleId: true },
           orderBy: { startAt: "asc" },
+        },
+        modules: {
+          where: { isActive: true },
+          select: { id: true, title: true, order: true },
+          orderBy: { order: "asc" },
         },
       },
       orderBy: { createdAt: "desc" },
@@ -799,8 +804,26 @@ export const getStudentBundleProgress = async (userId) => {
       const myWorkshops = course.events.filter((e) => registeredEventIds.has(e.id));
       if (myWorkshops.length === 0) return null;
 
-      const total = myWorkshops.length;
       const attended = myWorkshops.filter((e) => attendedIds.has(e.id)).length;
+
+      // Compulsory bundle courses: template modules with no scheduled event
+      // yet (for this student's batch, or at all) are still part of their
+      // bundle — surfaced as pending so totalWorkshops reflects the whole
+      // bundle, not just whatever has been scheduled so far.
+      let pendingWorkshops = [];
+      if (course.isCompulsory) {
+        const studentBatch = myWorkshops.find((w) => w.batch)?.batch ?? null;
+        const scheduledModuleIds = new Set(
+          course.events
+            .filter((e) => e.courseModuleId && (e.batch === studentBatch || !e.batch))
+            .map((e) => e.courseModuleId)
+        );
+        pendingWorkshops = course.modules
+          .filter((m) => !scheduledModuleIds.has(m.id))
+          .map((m) => ({ id: m.id, title: m.title }));
+      }
+
+      const total = myWorkshops.length + pendingWorkshops.length;
       return {
         courseId: course.id,
         courseName: course.name,
@@ -808,6 +831,7 @@ export const getStudentBundleProgress = async (userId) => {
         totalWorkshops: total,
         attended,
         percentage: total > 0 ? Math.round((attended / total) * 100) : 0,
+        pendingWorkshops,
       };
     })
     .filter(Boolean);

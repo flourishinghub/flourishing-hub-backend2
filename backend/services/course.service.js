@@ -10,11 +10,70 @@ export const getAllCourses = async (filters = {}) => {
   return prisma.course.findMany({
     where,
     include: {
+      modules: {
+        where: { isActive: true },
+        select: { id: true, title: true, description: true, order: true },
+        orderBy: { order: "asc" },
+      },
       _count: {
         select: { modules: true, events: true },
       },
     },
     orderBy: { createdAt: "desc" },
+  });
+};
+
+// A COMPULSORY BUNDLE course (Course.isCompulsory) is all-or-nothing — a
+// student registered into one of its workshops belongs in every workshop of
+// the same course + batch, not just the one they happened to register for
+// or get bulk-matched into. These two cascades keep that true from both
+// directions: registering a student pulls in the bundle's other existing
+// workshops, and scheduling a new workshop pulls in the bundle's existing
+// students. batch is compared as-is (including null === null) so courses
+// that don't use batches at all still cascade correctly.
+export const cascadeBundleRegistrationForStudent = async (userId, eventId) => {
+  const event = await prisma.event.findUnique({
+    where: { id: eventId },
+    select: { courseId: true, batch: true, course: { select: { isCompulsory: true } } }
+  });
+  if (!event?.courseId || !event.course?.isCompulsory) return;
+
+  const siblingEvents = await prisma.event.findMany({
+    where: {
+      courseId: event.courseId,
+      batch: event.batch,
+      status: { in: ["PUBLISHED", "COMPLETED"] },
+      id: { not: eventId }
+    },
+    select: { id: true }
+  });
+  if (!siblingEvents.length) return;
+
+  await prisma.eventRegistration.createMany({
+    data: siblingEvents.map((e) => ({ eventId: e.id, userId, status: "REGISTERED" })),
+    skipDuplicates: true
+  });
+};
+
+export const cascadeBundleRegistrationForNewEvent = async (eventId) => {
+  const event = await prisma.event.findUnique({
+    where: { id: eventId },
+    select: { courseId: true, batch: true, course: { select: { isCompulsory: true } } }
+  });
+  if (!event?.courseId || !event.course?.isCompulsory) return;
+
+  const siblingRegistrations = await prisma.eventRegistration.findMany({
+    where: {
+      event: { courseId: event.courseId, batch: event.batch, id: { not: eventId } }
+    },
+    select: { userId: true },
+    distinct: ["userId"]
+  });
+  if (!siblingRegistrations.length) return;
+
+  await prisma.eventRegistration.createMany({
+    data: siblingRegistrations.map((r) => ({ eventId, userId: r.userId, status: "REGISTERED" })),
+    skipDuplicates: true
   });
 };
 
