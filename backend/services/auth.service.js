@@ -9,7 +9,7 @@ import {
   signRefreshToken,
   verifyRefreshToken
 } from "../utils/jwt.js";
-import { createAndSendOTP } from "./emailVerification.service.js";
+import { createAndSendOTP, resendOTP } from "./emailVerification.service.js";
 import { autoAssignCohortOnSignup } from "./batchAssignment.service.js";
 
 const buildAuthResponse = async (user) => {
@@ -48,11 +48,28 @@ export const register = async (payload) => {
   }
 
   const existingUser = await prisma.user.findUnique({
-    where: { email: payload.email }
+    where: { email: payload.email.toLowerCase() }
   });
 
   if (existingUser) {
-    throw new ApiError(StatusCodes.CONFLICT, "Email is already registered");
+    if (existingUser.isVerified) {
+      throw new ApiError(StatusCodes.CONFLICT, "Email is already registered");
+    }
+    // Unverified account from an earlier, incomplete signup (e.g. the OTP email
+    // never arrived, or they closed the tab before verifying) — instead of
+    // permanently locking this email out with "already registered", resend a
+    // fresh OTP for the same account so they can pick up where they left off.
+    await resendOTP(existingUser.id).catch((err) => {
+      console.error("OTP resend during re-registration failed:", err.message);
+    });
+    return {
+      userId: existingUser.id,
+      email: existingUser.email,
+      name: existingUser.name,
+      role: existingUser.role,
+      isVerified: existingUser.isVerified,
+      requiresOTP: true
+    };
   }
 
   if ((payload.role === "STUDENT" || payload.role === "VOLUNTEER") && !payload.studentProfile) {
