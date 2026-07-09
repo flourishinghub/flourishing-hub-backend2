@@ -755,7 +755,7 @@ export const getAdminDashboardData = async () => {
 
 // STUDENT BUNDLE PROGRESS API
 export const getStudentBundleProgress = async (userId) => {
-  const [courses, attendedByEvent, attendedByReg] = await Promise.all([
+  const [courses, attendedByEvent, attendedByReg, myRegistrations] = await Promise.all([
     prisma.course.findMany({
       where: { status: "ACTIVE" },
       include: {
@@ -775,27 +775,42 @@ export const getStudentBundleProgress = async (userId) => {
       where: { userId, status: "ATTENDED" },
       select: { eventId: true },
     }),
+    // userId is the leftmost column of @@index([userId, registeredAt]) on
+    // EventRegistration, so this is a single indexed lookup, not a scan.
+    prisma.eventRegistration.findMany({
+      where: { userId },
+      select: { eventId: true },
+    }),
   ]);
 
   const attendedIds = new Set([
     ...attendedByEvent.map((r) => r.eventId),
     ...attendedByReg.map((r) => r.eventId),
   ]);
+  const registeredEventIds = new Set(myRegistrations.map((r) => r.eventId));
 
-  return courses.map((course) => {
-    // A course with no scheduled workshops yet has no meaningful denominator —
-    // report 0/0 rather than fabricating a "4" that doesn't correspond to anything.
-    const total = course.events.length;
-    const attended = course.events.filter((e) => attendedIds.has(e.id)).length;
-    return {
-      courseId: course.id,
-      courseName: course.name,
-      isCompulsory: course.isCompulsory,
-      totalWorkshops: total,
-      attended,
-      percentage: total > 0 ? Math.round((attended / total) * 100) : 0,
-    };
-  });
+  return courses
+    .map((course) => {
+      // Only count workshops this student is actually registered for — a
+      // course previously showed every one of its workshops to every
+      // student regardless of registration, so a batch that was never
+      // enrolled in a bundle still saw it at 0% instead of not seeing it
+      // at all.
+      const myWorkshops = course.events.filter((e) => registeredEventIds.has(e.id));
+      if (myWorkshops.length === 0) return null;
+
+      const total = myWorkshops.length;
+      const attended = myWorkshops.filter((e) => attendedIds.has(e.id)).length;
+      return {
+        courseId: course.id,
+        courseName: course.name,
+        isCompulsory: course.isCompulsory,
+        totalWorkshops: total,
+        attended,
+        percentage: total > 0 ? Math.round((attended / total) * 100) : 0,
+      };
+    })
+    .filter(Boolean);
 };
 
 // INSTRUCTOR FEEDBACK PORTAL API

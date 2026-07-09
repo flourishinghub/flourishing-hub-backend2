@@ -175,9 +175,12 @@ export const listEvents = async (query) => {
           }
         }
       : {}),
-    // Batch filter: if batch param provided, show events with no batch OR matching batch
+    // Batch filter: if batch param provided, show events with no batch OR matching batch.
+    // Case-insensitive to match autoRegisterBatch's cohort comparison (import.service.js) —
+    // otherwise a student auto-registered via a differently-cased batch code (e.g. admin
+    // typed "D1T1", cohort stored as "d1t1") never sees the event in their own events list.
     ...(query.batch !== undefined
-      ? { OR: [{ batch: null }, ...(query.batch ? [{ batch: query.batch }] : [])] }
+      ? { OR: [{ batch: null }, ...(query.batch ? [{ batch: { equals: query.batch, mode: "insensitive" } }] : [])] }
       : {})
   };
 

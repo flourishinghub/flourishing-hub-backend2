@@ -738,7 +738,15 @@ const importEvents = async (rows, meta, createdById) => {
           throw new ApiError(StatusCodes.BAD_REQUEST, "Event row is missing required fields");
         }
 
-        await createEvent(payload, createdById);
+        payload.instructorId = await resolveStaffId(payload.instructor, "INSTRUCTOR");
+        payload.associateInstructorId = await resolveStaffId(payload.associateInstructorName, "ASSOCIATE_INSTRUCTOR");
+        const event = await createEvent(payload, createdById);
+        // This branch (Course Name + Tutorial style sheets) never registered
+        // anyone — every other import path calls autoRegisterBatch, this one
+        // just created the events and silently left students unregistered.
+        if (payload.batch && meta.workshopType !== 'optional') {
+          await autoRegisterBatch(event.id, payload.batch);
+        }
         return { created: 1 };
       })
     : executeImportRows(rows, async (row) => {
