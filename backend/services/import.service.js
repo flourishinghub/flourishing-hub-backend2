@@ -641,8 +641,11 @@ const importUsers = async (rows, meta) => {
 };
 
 const autoRegisterBatch = async (eventId, batchCode) => {
+  // Case-insensitive: admins/students type batch codes inconsistently ("d1t1" vs
+  // "D1T1"), and an exact-case mismatch here used to silently register zero
+  // students with no error at all.
   const students = await prisma.user.findMany({
-    where: { role: "STUDENT", studentProfile: { cohort: batchCode } },
+    where: { role: "STUDENT", studentProfile: { cohort: { equals: batchCode, mode: "insensitive" } } },
     select: { id: true }
   });
   if (!students.length) return;
