@@ -87,12 +87,26 @@ const normalizeDate = (value) => {
   return Number.isNaN(parsed.getTime()) ? undefined : parsed;
 };
 
+// IST is UTC+5:30 — admins fill the schedule template with local India time
+// (e.g. "10:00 AM"), not UTC, so every wall-clock time built below must be
+// shifted back by this offset to land on the correct UTC instant.
+const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
+
+// Builds the correct UTC Date for an IST wall-clock date+time. year/month/day
+// come from UTC getters (see note below) and are calendar values, not a UTC
+// instant by themselves — Date.UTC(...) here just assembles them into a
+// timestamp, which istToUtc then corrects from "IST clock reading" to "UTC instant".
+const istToUtc = (year, month, day, hours = 0, minutes = 0) =>
+  new Date(Date.UTC(year, month, day, hours, minutes) - IST_OFFSET_MS);
+
 // NOTE: dateValue may arrive as a plain date string (e.g. "2026-05-10", parsed by
 // `new Date()` as UTC midnight) or as a native Date object from an Excel cell (exceljs
 // constructs these at local midnight). Reading the calendar date back out via the UTC
-// getters — and rebuilding the combined timestamp with Date.UTC — keeps both cases on
-// the same clock instead of mixing a UTC-parsed date with a locally-set time, which was
-// silently shifting bulk-imported event times by the server/client's UTC offset.
+// getters keeps both cases on the same clock instead of mixing a UTC-parsed date with
+// a locally-set time, which was silently shifting bulk-imported event times by the
+// server/client's UTC offset. The final istToUtc() call then converts that IST
+// wall-clock reading into the correct UTC instant — without it, a time typed as
+// "10:00 AM" (meant as IST) was stored/displayed as 10:00 AM UTC, i.e. 5.5 hours late.
 const combineDateAndTime = (dateValue, timeValue) => {
   const baseDate = normalizeDate(dateValue);
   if (!baseDate) {
@@ -104,14 +118,14 @@ const combineDateAndTime = (dateValue, timeValue) => {
   const day = baseDate.getUTCDate();
 
   if (timeValue === undefined || timeValue === null || timeValue === "") {
-    return new Date(Date.UTC(year, month, day));
+    return istToUtc(year, month, day);
   }
 
   const normalizedTime = String(timeValue).trim().toLowerCase();
   const directDate = normalizeDate(timeValue);
 
   if (directDate && directDate.getFullYear() > 1900) {
-    return new Date(Date.UTC(year, month, day, directDate.getUTCHours(), directDate.getUTCMinutes()));
+    return istToUtc(year, month, day, directDate.getUTCHours(), directDate.getUTCMinutes());
   }
 
   // Optional trailing `:SS` group so times rendered with seconds (a common
@@ -120,7 +134,7 @@ const combineDateAndTime = (dateValue, timeValue) => {
   // no-match branch below and silently dropped the time to midnight.
   const match = normalizedTime.match(/^(\d{1,2})(?::|\.)?(\d{2})?(?::(\d{2}))?\s*(am|pm)?$/i);
   if (!match) {
-    return new Date(Date.UTC(year, month, day));
+    return istToUtc(year, month, day);
   }
 
   let hours = Number(match[1]);
@@ -134,7 +148,7 @@ const combineDateAndTime = (dateValue, timeValue) => {
     hours = 0;
   }
 
-  return new Date(Date.UTC(year, month, day, hours, minutes));
+  return istToUtc(year, month, day, hours, minutes);
 };
 
 const mapScheduleRowToEventPayload = (row, meta = {}) => {
