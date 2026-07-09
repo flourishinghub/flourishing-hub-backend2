@@ -156,10 +156,12 @@ export const getInstructorDashboardData = async (userId) => {
       orderBy: { createdAt: "desc" }
     }),
     
-    // Upcoming Sessions
+    // Upcoming Sessions — "upcoming" means "not finished yet" (endAt >= now),
+    // not "not started yet" (startAt >= now), so a session that's currently
+    // live stays here instead of jumping to Past Sessions the moment it starts.
     prisma.eventModule.findMany({
       where: {
-        startAt: { gte: new Date() },
+        endAt: { gte: new Date() },
         event: {
           assignments: {
             some: {
@@ -174,11 +176,12 @@ export const getInstructorDashboardData = async (userId) => {
       },
       orderBy: { startAt: "asc" }
     }),
-    
-    // Past Sessions
+
+    // Past Sessions — mirrors the endAt cutoff above so a live session
+    // (started, not yet ended) never appears in both buckets at once.
     prisma.eventModule.findMany({
       where: {
-        startAt: { lt: new Date() },
+        endAt: { lt: new Date() },
         event: {
           assignments: {
             some: {

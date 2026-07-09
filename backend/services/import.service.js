@@ -678,15 +678,15 @@ const importUsers = async (rows, meta) => {
   });
 };
 
-// Schedule template rows only carry the associate instructor's name as free
-// text — this matches it against a real ASSOCIATE_INSTRUCTOR account so
-// createEvent can create an actual EventStaffAssignment instead of the name
-// just sitting in the description as decoration. No match just means no
-// assignment is made; it doesn't fail the row.
-const resolveAssociateInstructorId = async (name) => {
+// Schedule template rows only carry the instructor/associate instructor's
+// name as free text — this matches it against a real account of the given
+// role so createEvent can create an actual EventStaffAssignment instead of
+// the name just sitting in the description as decoration. No match just
+// means no assignment is made; it doesn't fail the row.
+const resolveStaffId = async (name, role) => {
   if (!name) return undefined;
   const user = await prisma.user.findFirst({
-    where: { name: { equals: name, mode: "insensitive" }, role: "ASSOCIATE_INSTRUCTOR" },
+    where: { name: { equals: name, mode: "insensitive" }, role },
     select: { id: true }
   });
   return user?.id;
@@ -720,7 +720,8 @@ const importEvents = async (rows, meta, createdById) => {
       if (!payload) {
         throw new ApiError(StatusCodes.BAD_REQUEST, "Row missing date or time");
       }
-      payload.associateInstructorId = await resolveAssociateInstructorId(payload.associateInstructorName);
+      payload.instructorId = await resolveStaffId(payload.instructor, "INSTRUCTOR");
+      payload.associateInstructorId = await resolveStaffId(payload.associateInstructorName, "ASSOCIATE_INSTRUCTOR");
       const event = await createEvent(payload, createdById);
       // payload.batch already resolved to the modal's Batch Code (if set) or
       // this row's own tutorial/batch column — see mapScheduleRowWithModule.
@@ -770,7 +771,8 @@ const importEvents = async (rows, meta, createdById) => {
       throw new ApiError(StatusCodes.BAD_REQUEST, "Event row is missing required fields");
     }
 
-    payload.associateInstructorId = await resolveAssociateInstructorId(payload.associateInstructorName);
+    payload.instructorId = await resolveStaffId(payload.instructor, "INSTRUCTOR");
+    payload.associateInstructorId = await resolveStaffId(payload.associateInstructorName, "ASSOCIATE_INSTRUCTOR");
     const event = await createEvent(payload, createdById);
     // payload.batch already resolved to the modal's Batch Code (if set) or this
     // row's own tutorial/batch column — see mapScheduleRowToEventPayload.

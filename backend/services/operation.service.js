@@ -583,6 +583,12 @@ export const getEventAssignedVolunteers = async (eventId, actor) => {
   });
 };
 
+// Was hardcoded to ASSOCIATE_INSTRUCTOR, so an instructor calling this same
+// endpoint always got an empty list. actor.role is the caller's own
+// EventStaffAssignment role (INSTRUCTOR/ASSOCIATE_INSTRUCTOR), so this now
+// serves both dashboards correctly. userId+role is a covered index
+// (@@index([userId, role]) on EventStaffAssignment), so this stays a single
+// indexed lookup regardless of which role calls it.
 export const getMyAssignedEvents = async (actor) => {
   const ninetyDaysAgo = new Date();
   ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
@@ -590,7 +596,7 @@ export const getMyAssignedEvents = async (actor) => {
   const assignments = await prisma.eventStaffAssignment.findMany({
     where: {
       userId: actor.id,
-      role: "ASSOCIATE_INSTRUCTOR",
+      role: actor.role,
       event: {
         status: { in: ["PUBLISHED", "COMPLETED"] },
         startAt: { gte: ninetyDaysAgo }
