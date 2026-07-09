@@ -139,65 +139,9 @@ export const getInstructorDashboardData = async (userId) => {
     throw new Error("Instructor profile not found");
   }
 
-  const [assignments, upcomingSessions, pastSessions, allEvents, attendanceRecords] = await Promise.all([
-    // Staff Assignments
-    prisma.eventStaffAssignment.findMany({
-      where: { 
-        userId,
-        role: "INSTRUCTOR"
-      },
-      include: {
-        event: {
-          include: {
-            modules: true
-          }
-        }
-      },
-      orderBy: { createdAt: "desc" }
-    }),
-    
-    // Upcoming Sessions — "upcoming" means "not finished yet" (endAt >= now),
-    // not "not started yet" (startAt >= now), so a session that's currently
-    // live stays here instead of jumping to Past Sessions the moment it starts.
-    prisma.eventModule.findMany({
-      where: {
-        endAt: { gte: new Date() },
-        event: {
-          assignments: {
-            some: {
-              userId,
-              role: "INSTRUCTOR"
-            }
-          }
-        }
-      },
-      include: {
-        event: true
-      },
-      orderBy: { startAt: "asc" }
-    }),
-
-    // Past Sessions — mirrors the endAt cutoff above so a live session
-    // (started, not yet ended) never appears in both buckets at once.
-    prisma.eventModule.findMany({
-      where: {
-        endAt: { lt: new Date() },
-        event: {
-          assignments: {
-            some: {
-              userId,
-              role: "INSTRUCTOR"
-            }
-          }
-        }
-      },
-      include: {
-        event: true
-      },
-      orderBy: { startAt: "desc" }
-    }),
-    
-    // All Events for Calendar
+  const [assignedEvents, attendanceRecords] = await Promise.all([
+    // Every event this instructor is assigned to, with its sub-sessions
+    // (EventModule) if any were created from a template.
     prisma.event.findMany({
       where: {
         assignments: {
@@ -234,33 +178,55 @@ export const getInstructorDashboardData = async (userId) => {
     department: user.instructorProfile.department
   };
 
-  // Upcoming Sessions with venue, time, mode
-  const upcomingSessionsData = upcomingSessions.map(session => ({
-    id: session.id,
-    title: session.title,
-    eventTitle: session.event.title,
-    courseId: session.event.courseId,
-    venue: session.venue || session.event.venue,
-    startAt: session.startAt,
-    endAt: session.endAt,
-    mode: session.meetLink ? "online" : "offline",
-    meetLink: session.meetLink
-  }));
+  // Every stat, list and calendar entry below is built from "sessions", not
+  // events directly. An event created from a template has one EventModule
+  // per sub-session — use those. A plain event (e.g. a bulk-schedule import,
+  // which never creates EventModule rows) has none, so it falls back to
+  // standing in as its own single session. Without this fallback, a
+  // bulk-imported event never appeared anywhere on the instructor's
+  // dashboard even when the instructor was correctly assigned to it.
+  const now = new Date();
+  const allSessions = assignedEvents.flatMap((event) =>
+    event.modules.length > 0
+      ? event.modules.map((m) => ({
+          id: m.id,
+          title: m.title,
+          eventTitle: event.title,
+          courseId: event.courseId,
+          venue: m.venue || event.venue,
+          startAt: m.startAt,
+          endAt: m.endAt,
+          mode: m.meetLink ? "online" : "offline",
+          meetLink: m.meetLink
+        }))
+      : [{
+          id: event.id,
+          title: event.title,
+          eventTitle: event.title,
+          courseId: event.courseId,
+          venue: event.venue,
+          startAt: event.startAt,
+          endAt: event.endAt,
+          mode: event.meetLink ? "online" : "offline",
+          meetLink: event.meetLink
+        }]
+  );
 
-  // Past Sessions
-  const pastSessionsData = pastSessions.map(session => ({
-    id: session.id,
-    title: session.title,
-    eventTitle: session.event.title,
-    courseId: session.event.courseId,
-    venue: session.venue || session.event.venue,
-    startAt: session.startAt,
-    endAt: session.endAt,
-    mode: session.meetLink ? "online" : "offline"
-  }));
+  // "Upcoming" means "not finished yet" (endAt >= now), not "not started
+  // yet" (startAt >= now), so a session that's currently live stays here
+  // instead of jumping to Past Sessions the moment it starts.
+  const upcomingSessionsData = allSessions
+    .filter((s) => new Date(s.endAt) >= now)
+    .sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime());
+
+  // Past Sessions — mirrors the endAt cutoff above so a live session
+  // (started, not yet ended) never appears in both buckets at once.
+  const pastSessionsData = allSessions
+    .filter((s) => new Date(s.endAt) < now)
+    .sort((a, b) => new Date(b.startAt).getTime() - new Date(a.startAt).getTime());
 
   // Calendar Data
-  const calendarData = allEvents.map(event => eventCalendarItem(event));
+  const calendarData = assignedEvents.map(event => eventCalendarItem(event));
 
   return {
     basicInfo,
