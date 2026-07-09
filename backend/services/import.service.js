@@ -881,7 +881,7 @@ export const previewImportEvents = async ({ fileBuffer, fileName, courseId, cour
   if (!rows.length) throw new ApiError(StatusCodes.BAD_REQUEST, "No data rows found in file");
 
   let events = [];
-  const metaForPreview = { courseId, courseModuleId };
+  const metaForPreview = { courseId, courseModuleId, workshopType };
   if (workshopType === 'optional') {
     metaForPreview.defaultType = 'OPEN_WORKSHOP';
     metaForPreview.capacity = capacity || 60;
@@ -910,10 +910,10 @@ export const processImportUpload = async ({ type, fileName, fileBuffer, meta, co
   if (courseId) parsedMeta.courseId = courseId;
   if (courseModuleId) parsedMeta.courseModuleId = courseModuleId;
   if (batchCode) parsedMeta.batchCode = batchCode;
+  if (workshopType) parsedMeta.workshopType = workshopType;
   if (workshopType === 'optional') {
     parsedMeta.defaultType = 'OPEN_WORKSHOP';
     parsedMeta.capacity = capacity || 60;
-    parsedMeta.workshopType = 'optional';
   }
   const allowedTypes = new Set([
     "USERS",
