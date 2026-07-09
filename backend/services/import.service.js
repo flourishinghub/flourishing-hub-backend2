@@ -197,6 +197,7 @@ const mapScheduleRowToEventPayload = (row, meta = {}) => {
     templateId: normalizeString(meta.templateId),
     courseId: normalizeString(meta.courseId) || undefined,
     courseModuleId: normalizeString(meta.courseModuleId) || undefined,
+    registrationMode: meta.workshopType === 'compulsory' ? 'COMPULSORY' : undefined,
     batch: tutorial || undefined,
     // Not consumed by createEvent — carried through for the frontend preview
     // table so it can show it as its own column.
@@ -239,6 +240,7 @@ const mapScheduleRowWithModule = (row, module, meta = {}) => {
     capacity: normalizeNumber(meta.capacity) || undefined,
     courseId: meta.courseId || undefined,
     courseModuleId: meta.courseModuleId || undefined,
+    registrationMode: meta.workshopType === 'compulsory' ? 'COMPULSORY' : undefined,
     batch: batch || undefined,
     // Not consumed by createEvent (which only reads recognized keys) — carried
     // through purely so the frontend preview table can show it as its own
@@ -696,7 +698,10 @@ const importEvents = async (rows, meta, createdById) => {
       throw new ApiError(StatusCodes.BAD_REQUEST, "Event row is missing required fields");
     }
 
-    await createEvent(payload, createdById);
+    const event = await createEvent(payload, createdById);
+    if (meta.batchCode && meta.workshopType !== 'optional') {
+      await autoRegisterBatch(event.id, meta.batchCode);
+    }
     return { created: 1 };
   });
 };

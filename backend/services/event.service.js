@@ -114,6 +114,7 @@ export const createEvent = async (payload, createdById) => {
       courseId: payload.courseId || undefined,
       courseModuleId: payload.courseModuleId || undefined,
       batch: payload.batch || undefined,
+      registrationMode: payload.registrationMode || undefined,
       createdById,
       modules: templateModules.length
         ? {
