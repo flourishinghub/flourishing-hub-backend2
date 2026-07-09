@@ -960,6 +960,40 @@ export const listImportJobs = async () =>
     }
   });
 
+// Flags each event with whether its instructor/associateInstructorName text
+// actually matches a real account, so the admin sees mismatches (typos,
+// partial names) in the preview instead of the assignment silently not
+// happening after import. A single bulk query, not one lookup per row.
+const annotateStaffMatches = async (events) => {
+  const names = new Set();
+  events.forEach((e) => {
+    if (e.instructor) names.add(e.instructor);
+    if (e.associateInstructorName) names.add(e.associateInstructorName);
+  });
+  if (names.size === 0) return events;
+
+  const accounts = await prisma.user.findMany({
+    where: {
+      name: { in: [...names] },
+      role: { in: ["INSTRUCTOR", "ASSOCIATE_INSTRUCTOR"] }
+    },
+    select: { name: true, role: true }
+  });
+
+  const matchedNames = {
+    INSTRUCTOR: new Set(accounts.filter((a) => a.role === "INSTRUCTOR").map((a) => a.name.toLowerCase())),
+    ASSOCIATE_INSTRUCTOR: new Set(accounts.filter((a) => a.role === "ASSOCIATE_INSTRUCTOR").map((a) => a.name.toLowerCase())),
+  };
+
+  return events.map((e) => ({
+    ...e,
+    instructorMatched: e.instructor ? matchedNames.INSTRUCTOR.has(e.instructor.toLowerCase()) : null,
+    associateInstructorMatched: e.associateInstructorName
+      ? matchedNames.ASSOCIATE_INSTRUCTOR.has(e.associateInstructorName.toLowerCase())
+      : null,
+  }));
+};
+
 export const previewImportEvents = async ({ fileBuffer, fileName, courseId, courseModuleId, batchCode, capacity, workshopType }) => {
   if (!fileBuffer) throw new ApiError(StatusCodes.BAD_REQUEST, "File is required");
   const rows = await parseWorkbookRows(fileBuffer, { fileName });
@@ -986,7 +1020,7 @@ export const previewImportEvents = async ({ fileBuffer, fileName, courseId, cour
     events = rows.map(row => mapScheduleRowToEventPayload(row, metaForPreview)).filter(Boolean);
   }
 
-  return events;
+  return annotateStaffMatches(events);
 };
 
 export const processImportUpload = async ({ type, fileName, fileBuffer, meta, courseId, courseModuleId, batchCode, capacity, workshopType }, createdById) => {
