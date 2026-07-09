@@ -212,7 +212,10 @@ const mapScheduleRowToEventPayload = (row, meta = {}) => {
     courseId: normalizeString(meta.courseId) || undefined,
     courseModuleId: normalizeString(meta.courseModuleId) || undefined,
     registrationMode: meta.workshopType === 'compulsory' ? 'COMPULSORY' : undefined,
-    batch: tutorial || undefined,
+    // A batch code typed into the modal's form field applies to every row (useful
+    // when the whole file is one batch); leaving it blank falls back to each row's
+    // own "tutorial/batch" column, so a single file can mix multiple batches.
+    batch: normalizeString(meta.batchCode) || tutorial || undefined,
     // Not consumed by createEvent — carried through for the frontend preview
     // table so it can show it as its own column.
     instructor: instructor || undefined,
@@ -255,7 +258,7 @@ const mapScheduleRowWithModule = (row, module, meta = {}) => {
     courseId: meta.courseId || undefined,
     courseModuleId: meta.courseModuleId || undefined,
     registrationMode: meta.workshopType === 'compulsory' ? 'COMPULSORY' : undefined,
-    batch: batch || undefined,
+    batch: normalizeString(meta.batchCode) || batch || undefined,
     // Not consumed by createEvent (which only reads recognized keys) — carried
     // through purely so the frontend preview table can show it as its own
     // column instead of it only being buried inside the description text.
@@ -662,12 +665,11 @@ const importEvents = async (rows, meta, createdById) => {
       if (!payload) {
         throw new ApiError(StatusCodes.BAD_REQUEST, "Row missing date or time");
       }
-      if (meta.batchCode && !payload.batch) {
-        payload.batch = meta.batchCode;
-      }
       const event = await createEvent(payload, createdById);
-      if (meta.batchCode && meta.workshopType !== 'optional') {
-        await autoRegisterBatch(event.id, meta.batchCode);
+      // payload.batch already resolved to the modal's Batch Code (if set) or
+      // this row's own tutorial/batch column — see mapScheduleRowWithModule.
+      if (payload.batch && meta.workshopType !== 'optional') {
+        await autoRegisterBatch(event.id, payload.batch);
       }
       return { created: 1 };
     });
@@ -713,8 +715,10 @@ const importEvents = async (rows, meta, createdById) => {
     }
 
     const event = await createEvent(payload, createdById);
-    if (meta.batchCode && meta.workshopType !== 'optional') {
-      await autoRegisterBatch(event.id, meta.batchCode);
+    // payload.batch already resolved to the modal's Batch Code (if set) or this
+    // row's own tutorial/batch column — see mapScheduleRowToEventPayload.
+    if (payload.batch && meta.workshopType !== 'optional') {
+      await autoRegisterBatch(event.id, payload.batch);
     }
     return { created: 1 };
   });
@@ -895,7 +899,11 @@ export const previewImportEvents = async ({ fileBuffer, fileName, courseId, cour
   if (!rows.length) throw new ApiError(StatusCodes.BAD_REQUEST, "No data rows found in file");
 
   let events = [];
-  const metaForPreview = { courseId, courseModuleId, workshopType };
+  // batchCode included here so mapScheduleRowToEventPayload/mapScheduleRowWithModule
+  // resolve `batch` the same way preview and the real upload do: the modal's Batch
+  // Code overrides every row when set, otherwise each row's own tutorial/batch
+  // column is used — so a single file can mix multiple batches.
+  const metaForPreview = { courseId, courseModuleId, workshopType, batchCode };
   if (workshopType === 'optional') {
     metaForPreview.defaultType = 'OPEN_WORKSHOP';
     metaForPreview.capacity = capacity || 60;
@@ -909,10 +917,6 @@ export const previewImportEvents = async ({ fileBuffer, fileName, courseId, cour
     events = rows.map(row => mapScheduleRowWithModule(row, mod, metaForPreview)).filter(Boolean);
   } else {
     events = rows.map(row => mapScheduleRowToEventPayload(row, metaForPreview)).filter(Boolean);
-  }
-
-  if (batchCode) {
-    events = events.map(e => ({ ...e, batch: batchCode }));
   }
 
   return events;
