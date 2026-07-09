@@ -10,6 +10,8 @@ import {
   getAllEventsWithRegistrations,
   getEventWithRegistrations,
   deleteEvent,
+  bulkDeleteEvents,
+  deleteEventsByCourse,
   removeStaffAssignment,
   getVolunteersWithActivity,
   getEventDetailsForAdmin,
@@ -209,10 +211,42 @@ export const deleteEventController = asyncHandler(async (req, res) => {
 
   const { eventId } = req.params;
   await deleteEvent(eventId);
-  
+
   res.status(StatusCodes.OK).json({
     success: true,
     message: "Event deleted successfully"
+  });
+});
+
+// BULK DELETE SELECTED EVENTS
+export const bulkDeleteEventsController = asyncHandler(async (req, res) => {
+  if (req.user.role !== 'ADMIN') {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Admin role required");
+  }
+
+  const { eventIds } = req.body;
+  const result = await bulkDeleteEvents(eventIds);
+
+  res.status(StatusCodes.OK).json({
+    success: true,
+    message: `${result.deletedCount} event(s) deleted successfully`,
+    data: result
+  });
+});
+
+// DELETE ALL EVENTS OF A SPECIFIC COURSE
+export const deleteEventsByCourseController = asyncHandler(async (req, res) => {
+  if (req.user.role !== 'ADMIN') {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Admin role required");
+  }
+
+  const { courseId } = req.params;
+  const result = await deleteEventsByCourse(courseId);
+
+  res.status(StatusCodes.OK).json({
+    success: true,
+    message: `${result.deletedCount} event(s) deleted successfully`,
+    data: result
   });
 });
 

@@ -11,6 +11,8 @@ import {
   getAllEventsWithRegistrationsController,
   getEventWithRegistrationsController,
   deleteEventController,
+  bulkDeleteEventsController,
+  deleteEventsByCourseController,
   removeStaffAssignmentController,
   getVolunteersController,
   getEventDetailsForAdminController,
@@ -30,6 +32,10 @@ export const adminRoutes = Router();
 // Event Management
 adminRoutes.post("/events", authenticate, createEventController);
 adminRoutes.put("/events/:eventId", authenticate, modifyEventController);
+// These two must be declared before the generic "/events/:eventId" delete
+// route below, otherwise Express would match "/events/bulk" as eventId="bulk".
+adminRoutes.delete("/events/bulk", authenticate, bulkDeleteEventsController);
+adminRoutes.delete("/events/course/:courseId", authenticate, deleteEventsByCourseController);
 adminRoutes.delete("/events/:eventId", authenticate, deleteEventController);
 adminRoutes.get("/events", authenticate, getAllEventsController);
 adminRoutes.get("/events-with-registrations", authenticate, getAllEventsWithRegistrationsController);

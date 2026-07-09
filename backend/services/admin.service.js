@@ -1,4 +1,6 @@
 import { prisma } from "../database/prisma.js";
+import { ApiError } from "../utils/ApiError.js";
+import { StatusCodes } from "http-status-codes";
 
 // Statuses that no longer occupy a seat — excluded from "occupied seat" / capacity counts.
 const INACTIVE_REGISTRATION_STATUSES = ["CANCELLED", "NO_SHOW", "WAITLISTED"];
@@ -958,6 +960,28 @@ export const deleteEvent = async (eventId) => {
   });
 
   return event;
+};
+
+// BULK DELETE SELECTED EVENTS (checkbox multi-select in Event Management)
+export const bulkDeleteEvents = async (eventIds) => {
+  if (!Array.isArray(eventIds) || eventIds.length === 0) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, "eventIds must be a non-empty array");
+  }
+  const result = await prisma.event.deleteMany({ where: { id: { in: eventIds } } });
+  return { deletedCount: result.count };
+};
+
+// DELETE ALL EVENTS OF A SPECIFIC COURSE ("delete all" scoped by course filter)
+export const deleteEventsByCourse = async (courseId) => {
+  if (!courseId) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, "courseId is required");
+  }
+  const course = await prisma.course.findUnique({ where: { id: courseId }, select: { id: true } });
+  if (!course) {
+    throw new ApiError(StatusCodes.NOT_FOUND, "Course not found");
+  }
+  const result = await prisma.event.deleteMany({ where: { courseId } });
+  return { deletedCount: result.count };
 };
 
 // REMOVE STAFF ASSIGNMENT
