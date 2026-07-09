@@ -3,6 +3,7 @@ import { StatusCodes } from "http-status-codes";
 
 import { prisma } from "../database/prisma.js";
 import { createEvent } from "./event.service.js";
+import { registerCourseBatchForEvent } from "./batchAssignment.service.js";
 import { ApiError } from "../utils/ApiError.js";
 import { createWorkbookBuffer, parseWorkbookRows } from "../utils/excel.js";
 
@@ -692,21 +693,6 @@ const resolveStaffId = async (name, role) => {
   return user?.id;
 };
 
-const autoRegisterBatch = async (eventId, batchCode) => {
-  // Case-insensitive: admins/students type batch codes inconsistently ("d1t1" vs
-  // "D1T1"), and an exact-case mismatch here used to silently register zero
-  // students with no error at all.
-  const students = await prisma.user.findMany({
-    where: { role: "STUDENT", studentProfile: { cohort: { equals: batchCode, mode: "insensitive" } } },
-    select: { id: true }
-  });
-  if (!students.length) return;
-  await prisma.eventRegistration.createMany({
-    data: students.map(s => ({ eventId, userId: s.id, status: "REGISTERED" })),
-    skipDuplicates: true
-  });
-};
-
 const importEvents = async (rows, meta, createdById) => {
   // Module-based import: course + workshop selected from the modal
   if (meta.courseId && meta.courseModuleId) {
@@ -726,7 +712,7 @@ const importEvents = async (rows, meta, createdById) => {
       // payload.batch already resolved to the modal's Batch Code (if set) or
       // this row's own tutorial/batch column — see mapScheduleRowWithModule.
       if (payload.batch && meta.workshopType !== 'optional') {
-        await autoRegisterBatch(event.id, payload.batch);
+        await registerCourseBatchForEvent(event.id, payload.courseId, payload.batch);
       }
       return { created: 1 };
     });
@@ -745,7 +731,7 @@ const importEvents = async (rows, meta, createdById) => {
         // anyone — every other import path calls autoRegisterBatch, this one
         // just created the events and silently left students unregistered.
         if (payload.batch && meta.workshopType !== 'optional') {
-          await autoRegisterBatch(event.id, payload.batch);
+          await registerCourseBatchForEvent(event.id, payload.courseId, payload.batch);
         }
         return { created: 1 };
       })
@@ -785,7 +771,7 @@ const importEvents = async (rows, meta, createdById) => {
     // payload.batch already resolved to the modal's Batch Code (if set) or this
     // row's own tutorial/batch column — see mapScheduleRowToEventPayload.
     if (payload.batch && meta.workshopType !== 'optional') {
-      await autoRegisterBatch(event.id, payload.batch);
+      await registerCourseBatchForEvent(event.id, payload.courseId, payload.batch);
     }
     return { created: 1 };
   });

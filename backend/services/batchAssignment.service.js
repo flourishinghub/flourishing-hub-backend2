@@ -76,6 +76,54 @@ const findDuplicateRows = async (validRows, courseId) => {
   );
 };
 
+// Registers one student into every COMPULSORY workshop of this exact
+// course + batch. Scoped by BatchAssignment's (courseId, batchCode) instead
+// of the student's free-text StudentProfile.cohort field, so a batch code
+// that happens to repeat across two different courses can never cross-
+// register a student into the wrong course's workshops.
+const registerUserForCourseBatchEvents = async (userId, courseId, batchCode) => {
+  if (!userId || !courseId || !batchCode) return;
+  const events = await prisma.event.findMany({
+    where: {
+      courseId,
+      batch: { equals: batchCode, mode: "insensitive" },
+      registrationMode: "COMPULSORY"
+    },
+    select: { id: true }
+  });
+  if (!events.length) return;
+  await prisma.eventRegistration.createMany({
+    data: events.map((e) => ({ eventId: e.id, userId, status: "REGISTERED" })),
+    skipDuplicates: true
+  });
+};
+
+// Registers every already-matched student of this course + batch into one
+// event. "Matched" means BatchAssignment.matchedUserId was set by an
+// email/roll-number lookup (in uploadBatchAssignment or
+// autoAssignCohortOnSignup below) — so this never falls back to comparing
+// free-text batch/cohort strings across courses either.
+export const registerCourseBatchForEvent = async (eventId, courseId, batchCode) => {
+  if (!eventId || !courseId || !batchCode) return;
+  const event = await prisma.event.findUnique({ where: { id: eventId }, select: { registrationMode: true } });
+  if (event?.registrationMode !== "COMPULSORY") return;
+
+  const assignments = await prisma.batchAssignment.findMany({
+    where: {
+      courseId,
+      batchCode: { equals: batchCode, mode: "insensitive" },
+      matchedUserId: { not: null }
+    },
+    select: { matchedUserId: true }
+  });
+  const userIds = [...new Set(assignments.map((a) => a.matchedUserId))];
+  if (!userIds.length) return;
+  await prisma.eventRegistration.createMany({
+    data: userIds.map((userId) => ({ eventId, userId, status: "REGISTERED" })),
+    skipDuplicates: true
+  });
+};
+
 // courseId is required — every batch upload now belongs to a course (selected
 // from Course Management), not a bare batch code alone. resolutionMode is
 // undefined on the first call: if duplicates (same student already uploaded
@@ -192,6 +240,7 @@ export const uploadBatchAssignment = async ({ fileBuffer, fileName, courseId, re
         ]);
         savedAssignment = assignment;
         results.matched++;
+        await registerUserForCourseBatchEvents(existingUser.id, courseId, batchCode);
       } else {
         // Student hasn't signed up yet — store for later
         savedAssignment = existingAssignment
@@ -252,6 +301,10 @@ export const autoAssignCohortOnSignup = async (userId, email, rollNumber) => {
         where: { id: assignment.id },
         data: { isMatched: true, matchedUserId: userId }
       });
+
+      if (assignment.courseId) {
+        await registerUserForCourseBatchEvents(userId, assignment.courseId, assignment.batchCode);
+      }
     }
 
     return assignments[assignments.length - 1].batchCode;
