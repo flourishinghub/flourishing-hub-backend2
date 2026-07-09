@@ -87,6 +87,29 @@ const normalizeDate = (value) => {
   return Number.isNaN(parsed.getTime()) ? undefined : parsed;
 };
 
+// The schedule template's "date" column is DD-MM-YYYY (e.g. "20-07-2026").
+// JS's native Date() constructor doesn't parse that format reliably — it's
+// ambiguous with MM-DD-YYYY depending on engine/locale — so it's matched
+// explicitly here first. Falls back to normalizeDate() for a real Date
+// object (Excel date cells, already handled correctly by exceljs) or any
+// other string format, so older files/callers keep working.
+const parseScheduleDate = (value) => {
+  if (value instanceof Date) return normalizeDate(value);
+
+  const str = String(value ?? "").trim();
+  const match = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  if (match) {
+    const day = Number(match[1]);
+    const month = Number(match[2]);
+    const year = Number(match[3]);
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return new Date(Date.UTC(year, month - 1, day));
+    }
+  }
+
+  return normalizeDate(value);
+};
+
 // IST is UTC+5:30 — admins fill the schedule template with local India time
 // (e.g. "10:00 AM"), not UTC, so every wall-clock time built below must be
 // shifted back by this offset to land on the correct UTC instant.
@@ -108,7 +131,7 @@ const istToUtc = (year, month, day, hours = 0, minutes = 0) =>
 // wall-clock reading into the correct UTC instant — without it, a time typed as
 // "10:00 AM" (meant as IST) was stored/displayed as 10:00 AM UTC, i.e. 5.5 hours late.
 const combineDateAndTime = (dateValue, timeValue) => {
-  const baseDate = normalizeDate(dateValue);
+  const baseDate = parseScheduleDate(dateValue);
   if (!baseDate) {
     return undefined;
   }
@@ -159,13 +182,17 @@ const mapScheduleRowToEventPayload = (row, meta = {}) => {
     getRowValue(row, ["tutorial", "session", "batch", "Batch", "tutorial/batch"])
   );
   const sessionDate = getRowValue(row, ["sessionDate", "Session- Date", "date"]);
-  const sessionTime = getRowValue(row, ["time", "sessionTime"]);
+  const sessionTime = getRowValue(row, ["time", "sessionTime", "start time", "startTime"]);
   const sessionEndTime = getRowValue(row, ["endTime", "end time", "End Time"]);
   const durationHours = normalizeNumber(
     getRowValue(row, ["duration", "Duration (hrs)", "Duration"])
   );
   const venue = normalizeString(getRowValue(row, ["venue", "location"]));
   const instructor = normalizeString(getRowValue(row, ["instructor", "faculty"]));
+  const associateInstructor = normalizeString(
+    getRowValue(row, ["associate instructor", "associateInstructor", "associate_instructor"])
+  );
+  const quizLink = normalizeString(getRowValue(row, ["quiz link", "quizLink", "quiz_link"]));
   const attendedCount = normalizeNumber(
     getRowValue(row, [
       "noofstudentattendedthesession",
@@ -189,6 +216,7 @@ const mapScheduleRowToEventPayload = (row, meta = {}) => {
   const descriptionParts = [
     `Imported workshop schedule for ${courseName}.`,
     instructor ? `Instructor: ${instructor}.` : null,
+    associateInstructor ? `Associate Instructor: ${associateInstructor}.` : null,
     tutorial ? `Session: ${tutorial}.` : null
   ].filter(Boolean);
 
@@ -199,6 +227,7 @@ const mapScheduleRowToEventPayload = (row, meta = {}) => {
     status: normalizeString(meta.status) || "PUBLISHED",
     venue,
     meetLink: normalizeString(meta.meetLink),
+    quizLink,
     startAt: startAt.toISOString(),
     endAt: endAt.toISOString(),
     registrationOpensAt: meta.registrationOpensAt,
@@ -216,20 +245,26 @@ const mapScheduleRowToEventPayload = (row, meta = {}) => {
     // when the whole file is one batch); leaving it blank falls back to each row's
     // own "tutorial/batch" column, so a single file can mix multiple batches.
     batch: normalizeString(meta.batchCode) || tutorial || undefined,
-    // Not consumed by createEvent — carried through for the frontend preview
-    // table so it can show it as its own column.
+    // Not consumed by createEvent directly — carried through so the preview
+    // table can show it, and so importEvents can resolve it to a real
+    // EventStaffAssignment by matching against registered instructor accounts.
     instructor: instructor || undefined,
+    associateInstructorName: associateInstructor || undefined,
   };
 };
 
 // Used when course + workshop module are pre-selected from the modal
 const mapScheduleRowWithModule = (row, module, meta = {}) => {
   const sessionDate = getRowValue(row, ["date", "sessionDate", "Session- Date"]);
-  const sessionTime = getRowValue(row, ["time", "sessionTime"]);
+  const sessionTime = getRowValue(row, ["time", "sessionTime", "start time", "startTime"]);
   const sessionEndTime = getRowValue(row, ["endTime", "end time", "End Time"]);
   const durationHours = normalizeNumber(getRowValue(row, ["duration", "Duration (hrs)", "Duration"]));
   const venue = normalizeString(getRowValue(row, ["venue", "location"]));
   const instructor = normalizeString(getRowValue(row, ["instructor", "faculty"]));
+  const associateInstructor = normalizeString(
+    getRowValue(row, ["associate instructor", "associateInstructor", "associate_instructor"])
+  );
+  const quizLink = normalizeString(getRowValue(row, ["quiz link", "quizLink", "quiz_link"]));
   const batch = normalizeString(getRowValue(row, ["tutorial/batch", "tutorial", "batch", "Batch", "session"]));
 
   const startAt = combineDateAndTime(sessionDate, sessionTime);
@@ -243,6 +278,7 @@ const mapScheduleRowWithModule = (row, module, meta = {}) => {
   const descriptionParts = [
     module?.description || `Workshop session for ${title}.`,
     instructor ? `Instructor: ${instructor}.` : null,
+    associateInstructor ? `Associate Instructor: ${associateInstructor}.` : null,
     batch ? `Batch/Tutorial: ${batch}.` : null,
   ].filter(Boolean);
 
@@ -252,6 +288,7 @@ const mapScheduleRowWithModule = (row, module, meta = {}) => {
     type: normalizeString(meta.defaultType) || "WELLNESS_COURSE",
     status: "PUBLISHED",
     venue,
+    quizLink: quizLink || module?.quizLink || undefined,
     startAt: startAt.toISOString(),
     endAt: endAt.toISOString(),
     capacity: normalizeNumber(meta.capacity) || undefined,
@@ -259,10 +296,11 @@ const mapScheduleRowWithModule = (row, module, meta = {}) => {
     courseModuleId: meta.courseModuleId || undefined,
     registrationMode: meta.workshopType === 'compulsory' ? 'COMPULSORY' : undefined,
     batch: normalizeString(meta.batchCode) || batch || undefined,
-    // Not consumed by createEvent (which only reads recognized keys) — carried
-    // through purely so the frontend preview table can show it as its own
-    // column instead of it only being buried inside the description text.
+    // Not consumed by createEvent directly — carried through so the preview
+    // table can show it, and so importEvents can resolve it to a real
+    // EventStaffAssignment by matching against registered instructor accounts.
     instructor: instructor || undefined,
+    associateInstructorName: associateInstructor || undefined,
     isCampusWide: true,
     allowVolunteerSignup: true,
     requiresCheckIn: true,
@@ -640,6 +678,20 @@ const importUsers = async (rows, meta) => {
   });
 };
 
+// Schedule template rows only carry the associate instructor's name as free
+// text — this matches it against a real ASSOCIATE_INSTRUCTOR account so
+// createEvent can create an actual EventStaffAssignment instead of the name
+// just sitting in the description as decoration. No match just means no
+// assignment is made; it doesn't fail the row.
+const resolveAssociateInstructorId = async (name) => {
+  if (!name) return undefined;
+  const user = await prisma.user.findFirst({
+    where: { name: { equals: name, mode: "insensitive" }, role: "ASSOCIATE_INSTRUCTOR" },
+    select: { id: true }
+  });
+  return user?.id;
+};
+
 const autoRegisterBatch = async (eventId, batchCode) => {
   // Case-insensitive: admins/students type batch codes inconsistently ("d1t1" vs
   // "D1T1"), and an exact-case mismatch here used to silently register zero
@@ -668,6 +720,7 @@ const importEvents = async (rows, meta, createdById) => {
       if (!payload) {
         throw new ApiError(StatusCodes.BAD_REQUEST, "Row missing date or time");
       }
+      payload.associateInstructorId = await resolveAssociateInstructorId(payload.associateInstructorName);
       const event = await createEvent(payload, createdById);
       // payload.batch already resolved to the modal's Batch Code (if set) or
       // this row's own tutorial/batch column — see mapScheduleRowWithModule.
@@ -717,6 +770,7 @@ const importEvents = async (rows, meta, createdById) => {
       throw new ApiError(StatusCodes.BAD_REQUEST, "Event row is missing required fields");
     }
 
+    payload.associateInstructorId = await resolveAssociateInstructorId(payload.associateInstructorName);
     const event = await createEvent(payload, createdById);
     // payload.batch already resolved to the modal's Batch Code (if set) or this
     // row's own tutorial/batch column — see mapScheduleRowToEventPayload.

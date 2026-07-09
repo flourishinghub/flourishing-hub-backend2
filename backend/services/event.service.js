@@ -101,6 +101,7 @@ export const createEvent = async (payload, createdById) => {
       bannerImageUrl: payload.bannerImageUrl,
       venue: payload.venue,
       meetLink: payload.meetLink,
+      quizLink: payload.quizLink || undefined,
       startAt,
       endAt,
       registrationOpensAt: payload.registrationOpensAt ? new Date(payload.registrationOpensAt) : undefined,
