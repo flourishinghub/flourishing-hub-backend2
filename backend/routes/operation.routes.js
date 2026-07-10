@@ -15,7 +15,8 @@ import {
   getEventRegistrantsController,
   getEventAssignedVolunteersController,
   getMyCheckInController,
-  getMyEventProgressController
+  getMyEventProgressController,
+  getMyFeedbackController
 } from "../controllers/operation.controller.js";
 import { authenticate } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
@@ -47,3 +48,4 @@ operationRoutes.patch("/check-ins/:checkInId", validate(reviewCheckInSchema), re
 operationRoutes.post("/:eventId/feedback", validate(feedbackSchema), submitFeedbackController);
 operationRoutes.post("/modules/:moduleId/progress", validate(moduleProgressSchema), updateModuleProgressController);
 operationRoutes.get("/:eventId/my-progress", getMyEventProgressController);
+operationRoutes.get("/:eventId/my-feedback", getMyFeedbackController);

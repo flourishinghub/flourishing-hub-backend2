@@ -485,6 +485,15 @@ export const getMyCheckIn = async (eventId, actor) => {
   });
 };
 
+// Lets the live-event page know on load whether this student already rated
+// this event in a previous visit — without it, a page reload after
+// submitting would forget the rating was given and re-block "Exit session".
+export const getMyFeedback = async (eventId, actor) => {
+  return prisma.feedback.findUnique({
+    where: { eventId_userId: { eventId, userId: actor.id } }
+  });
+};
+
 export const getMyEventProgress = async (eventId, actor) => {
   const progress = await prisma.moduleProgress.findMany({
     where: {
