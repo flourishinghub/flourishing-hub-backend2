@@ -20,12 +20,16 @@
  *   2. A rating question (Linear scale, 1–5) → posts it to POST /quiz/feedback
  */
 
-// ─── Fill these in (Apps Script → Project Settings → Script Properties is
-// the safer place for the secret, but hardcoding here works too since this
-// file lives inside the Apps Script project, not a public webpage) ───
-const BACKEND_URL = 'https://YOUR-BACKEND-URL.onrender.com/api/v1'; // no trailing slash
-const WEBHOOK_SECRET = 'YOUR_QUIZ_WEBHOOK_SECRET'; // must match QUIZ_WEBHOOK_SECRET in the backend's .env
-const EVENT_ID = 'PASTE_THE_EVENT_ID_HERE'; // one Google Form = one specific workshop/event
+// ─── These two are the same for every workshop — already filled in, no
+// need to touch them. If you ever redeploy the backend to a new URL or
+// rotate QUIZ_WEBHOOK_SECRET in .env, update them here once. ───
+const BACKEND_URL = 'https://flourishing-hub-backend2-xif0.onrender.com/api/v1';
+const WEBHOOK_SECRET = 'fh-quiz-secret-2026-iitbfh';
+
+// ─── This is the ONE line you change every time you copy this form for a
+// new workshop. Get it from the admin panel: Events → click the workshop
+// → the URL is .../admin/events/<EVENT_ID>. ───
+const EVENT_ID = 'PASTE_THE_EVENT_ID_HERE';
 
 // Question title must CONTAIN one of these (case-insensitive) to be
 // recognised as the student's email — edit if your form uses different wording.
@@ -62,6 +66,13 @@ function installFormSubmitTrigger() {
 
 function onFormSubmitHandler(e) {
   try {
+    if (!EVENT_ID || EVENT_ID === 'PASTE_THE_EVENT_ID_HERE') {
+      Logger.log('EVENT_ID is not set — this form was probably just copied from the master template. ' +
+        'Open Extensions/Script editor, set EVENT_ID at the top of the script to this workshop\'s event ID, ' +
+        'then run installFormSubmitTrigger once more.');
+      return;
+    }
+
     const formResponse = e.response;
     const itemResponses = formResponse.getItemResponses();
 

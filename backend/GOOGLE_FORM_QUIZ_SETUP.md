@@ -3,108 +3,123 @@
 ## Overview
 
 When a workshop's "Quiz Link" is a Google Form, the backend has no way of
-knowing a student actually submitted it — until you attach a small script
-to that Google Form that tells the backend when someone does. Once set up,
-the admin Event page shows, per registered student:
+knowing a student actually submitted it — until a small script attached
+to that form tells it. Once set up, the admin Event page shows, per
+registered student:
 
 - ✅ / ❌ whether they submitted the quiz, and their score (out of 5)
 - ⭐ their session rating (out of 5), if they rated it
 
-This is one Apps Script per Google Form — since one form = one specific
-workshop, you attach it once when you create the form, then never touch it
-again (submissions after that are automatic).
+**You only do the full setup ONCE** (building a master template form).
+After that, every new workshop is just: **duplicate the master → change
+one line → done** — no code-writing per workshop.
 
-## What you need
+## Part A — Build the master template (one time only)
 
-- The event's ID (see step 3)
-- The `QUIZ_WEBHOOK_SECRET` value from the backend's `.env`
-- Your backend's live URL (e.g. `https://flourishing-hub-backend.onrender.com`)
+### 1. Create the form
 
-## Setup Steps
-
-### 1. Build the Google Form
-
-Your form needs:
-- **An "Email" question** (Short answer) — so the backend knows which
-  student submitted. Recommended: make it required, and turn on
-  Settings → Responses → "Restrict to users in [your organization]" so
-  Google auto-fills it correctly instead of relying on students typing
-  their own email.
-- **(Optional) Quiz questions** — go to Settings → the "Quizzes" tab →
-  turn on "Make this a quiz". Give each question a point value and mark
-  the correct answer. The script converts whatever you scored it out of
-  into a score out of 5 automatically — you don't need to make every quiz
-  exactly 5 points.
-- **(Optional) A rating question** — a "Linear scale" question, 1 to 5,
-  titled something like "Overall Session Rating" (avoid the word "rating"
-  colliding with an instructor-rating question — see the script's comments
-  if you add both).
+Make a new Google Form with:
+- **"Email" question** (Short answer, required). Recommended: Settings →
+  Responses → turn on "Restrict to users in [your organization]" so
+  Google auto-fills it instead of relying on students typing it correctly.
+- **Quiz questions** — placeholder ones are fine, you'll edit the actual
+  questions per workshop later. Go to Settings → **Quizzes** tab → turn on
+  **"Make this a quiz"**, and give each question a point value + correct
+  answer. Whatever total you grade it out of gets auto-converted to a
+  score out of 5 — you don't need to make it exactly 5 points.
+- **A rating question** — "Linear scale", 1 to 5, titled **"Overall
+  Session Rating"** (this exact wording matters — see the script's
+  `RATING_TITLE_KEYWORDS` comment if you want to change it).
 
 ### 2. Attach the script
 
-1. In the Google Form editor, click the **⋮** (three dots) menu → **Script editor**.
-2. Delete whatever's in `Code.gs` and paste in the contents of
-   [`scripts/google-form-webhook.gs`](./scripts/google-form-webhook.gs) from this repo.
-3. At the top of the script, fill in:
-   ```js
-   const BACKEND_URL = 'https://your-actual-backend-url.onrender.com/api/v1';
-   const WEBHOOK_SECRET = 'the QUIZ_WEBHOOK_SECRET value from .env';
-   const EVENT_ID = 'the event ID — see step 3 below';
-   ```
+1. In the form editor, click **⋮** (top right) → **Script editor**.
+2. Delete whatever's in `Code.gs`, paste in the full contents of
+   [`scripts/google-form-webhook.gs`](./scripts/google-form-webhook.gs).
+3. `BACKEND_URL` and `WEBHOOK_SECRET` are already filled in — leave them
+   alone. Leave `EVENT_ID` as the placeholder (`'PASTE_THE_EVENT_ID_HERE'`)
+   for now — this is the master template, it isn't tied to a real
+   workshop yet.
+4. Rename the Apps Script project (top left, "Untitled project") to
+   something like **"FH Quiz Webhook"**.
+5. Rename the form itself to **"FH Quiz Template — DO NOT EDIT, COPY ME"**
+   so nobody accidentally uses the master form for a real workshop.
 
-### 3. Find the Event ID
+Master template is done. You will never touch this form's responses or
+send this exact form to students.
 
-In the admin panel, go to **Events**, click into the specific workshop
-this form belongs to. The URL looks like:
+## Part B — For every new workshop
 
+### 1. Duplicate the template
+
+In Google Drive, find the master form → right-click → **Make a copy**.
+Rename the copy to the actual workshop name (e.g. "Leadership — Session 3 Quiz").
+The Apps Script (with `BACKEND_URL`/`WEBHOOK_SECRET` already filled in)
+comes along automatically with the copy.
+
+### 2. Edit the quiz questions for this workshop
+
+Update the quiz questions/answers to match this specific session. Leave
+the Email question and the "Overall Session Rating" question as they are.
+
+### 3. Get this workshop's Event ID
+
+In the admin panel: **Events** → click into this specific workshop. The
+URL looks like:
 ```
 https://your-frontend.vercel.app/admin/events/cmXXXXXXXXXXXXXXXXXXXXXXX
 ```
+Copy everything after `/admin/events/`.
 
-Everything after `/admin/events/` is the Event ID — copy that into `EVENT_ID`.
+(If the workshop doesn't exist in the admin panel yet, create it first —
+you need the Event ID before this step.)
 
-### 4. Install the trigger
+### 4. Set the Event ID and install the trigger
 
-Back in the Apps Script editor:
-1. In the function dropdown (top toolbar), select **`installFormSubmitTrigger`**.
-2. Click **Run** (▶).
-3. The first time, Google will ask you to authorize the script — click
-   through (Advanced → Go to [project name] (unsafe) is expected for a
-   script you wrote yourself; it's only "unsafe" in Google's eyes because
-   it isn't published/verified).
-4. Check **Executions** (left sidebar) to confirm it ran without errors.
+In the **copied** form → **⋮** → **Script editor**:
+1. Change the `EVENT_ID` line near the top to the ID from step 3.
+2. In the function dropdown (toolbar), select **`installFormSubmitTrigger`** → click **Run** (▶).
+   - First time ever doing this in your Google account, it'll ask you to
+     authorize — click through (Advanced → Go to [project] (unsafe) is
+     expected for a script you own).
+3. Check **Executions** (left sidebar) — should show it ran with no errors.
 
-You only need to do this once per form.
+### 5. Link the form to the workshop
 
-### 5. Test it
+Copy this form's **Send** link (the one students fill out, not the
+Script editor URL) into the workshop's **Quiz Link** field in the admin
+panel (Edit Event, or Course Module).
 
-Submit a test response to your own form (with a real student email, or
-your own if you have a test account). Then:
-- In Apps Script, check **Executions** — you should see `onFormSubmitHandler`
-  ran, and its logs should show a `postToBackend` result with `status: 200`.
-- In the admin panel, open that event's page — the student should now show
-  a quiz score and/or rating in the Registered Participants table.
+That's it — every future workshop repeats only Part B (2–3 minutes), no
+code editing beyond the one `EVENT_ID` line.
 
-If something's wrong, the Execution log will show the exact error —
-common ones:
-- **401 from the backend** → `WEBHOOK_SECRET` doesn't match `.env`'s `QUIZ_WEBHOOK_SECRET`.
-- **404 "No user found with email..."** → the email question wasn't
-  answered, or doesn't match a real account's email exactly.
-- **404 "No event found with id..."** → `EVENT_ID` is wrong — re-check step 3.
-- **410 "Submission window has closed"** → quiz submissions are only
-  accepted until 30 minutes after the workshop's scheduled end time.
-- Quiz score never shows up even though the form has quiz questions →
-  confirm Settings → Quizzes → "Make this a quiz" is actually on for
-  *this* form (it's a per-form setting).
+## Testing
+
+Submit a real test response (your own account works). Then:
+- Script editor → **Executions** → should show `onFormSubmitHandler` ran
+  with a `postToBackend` result at `status: 200`.
+- Admin panel → that event's page → your test account should now show a
+  quiz score and/or rating in Registered Participants.
+
+## Troubleshooting
+
+| Symptom | Cause |
+|---|---|
+| Nothing happens, no execution logged | Trigger wasn't installed — redo step 4.2 |
+| Log says "EVENT_ID is not set" | You forgot step 4.1 after copying |
+| 401 from backend | `WEBHOOK_SECRET` doesn't match `.env`'s `QUIZ_WEBHOOK_SECRET` (only possible if one of them was changed after this template was written) |
+| 404 "No user found with email..." | Email question wasn't answered, or doesn't match a real account's email exactly |
+| 404 "No event found with id..." | Wrong `EVENT_ID` — re-check step 3 |
+| 410 "Submission window has closed" | Quiz submissions are only accepted until 30 minutes after the workshop's scheduled end time |
+| Quiz score never appears despite quiz questions | Settings → Quizzes → "Make this a quiz" is off for *this specific copy* — it's per-form, doesn't carry a default |
 
 ## Where this data lives
 
-- Quiz scores are stored per-student against the event's session
-  (`ModuleProgress`, backend) and shown on the admin Event page's
-  Registered Participants table ("Quiz" column).
-- Ratings are stored in the same `Feedback` table the in-app star-rating
-  widget writes to — a student can rate either through the app or through
-  this form; whichever happens, the same "Rating" column picks it up.
-- Students also see their own score directly on their event page (the
-  quiz progress card), regardless of whether they got it via the app quiz
-  flow or this Google Form path.
+- Quiz scores: stored per-student against the event's session
+  (`ModuleProgress`), shown on the admin Event page's Registered
+  Participants table ("Quiz" column).
+- Ratings: stored in the same `Feedback` table the in-app star-rating
+  widget writes to — whichever path a student rates through, the same
+  "Rating" column picks it up.
+- Students see their own score on their own event page too, regardless
+  of whether it came via the in-app quiz flow or this Google Form path.
