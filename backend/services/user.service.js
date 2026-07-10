@@ -67,13 +67,32 @@ export const listUsers = async ({ role, search, department, programme, yearOfStu
   };
 };
 
-export const updateUserRole = async (userId, role) =>
-  prisma.user.update({
+export const updateUserRole = async (userId, role) => {
+  const user = await prisma.user.update({
     where: { id: userId },
     data: {
       role
     }
   });
+
+  // A role that requires its own profile row (currently just INSTRUCTOR —
+  // VOLUNTEER/ASSOCIATE_INSTRUCTOR/ADMIN dashboards don't hard-require one)
+  // must have one before that person's dashboard endpoint will accept them,
+  // otherwise the very first login after this promotion 404s with
+  // "Instructor profile not found". Every InstructorProfile field besides
+  // userId is optional, so an empty row is always a safe default here —
+  // admins/instructors can fill in designation/department later via the
+  // profile edit screen. Never touches an already-existing row.
+  if (role === "INSTRUCTOR") {
+    await prisma.instructorProfile.upsert({
+      where: { userId },
+      create: { userId },
+      update: {}
+    });
+  }
+
+  return user;
+};
 
 export const getUserById = async (userId) => {
   const user = await prisma.user.findUnique({
