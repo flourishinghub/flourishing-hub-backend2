@@ -390,7 +390,11 @@ export const getEventWithRegistrations = async (eventId) => {
       yearOfStudy: reg.user.studentProfile?.yearOfStudy,
       programme: reg.user.studentProfile?.programme,
       section: reg.user.studentProfile?.section,
-      cohort: reg.user.studentProfile?.cohort
+      // Prefer this event's own course+batch-scoped batch over the student's
+      // flat StudentProfile.cohort — a student enrolled in multiple courses
+      // only has one cohort value (last one written wins), so it can show
+      // the wrong batch here whenever it doesn't match this event's course.
+      cohort: event.batch || reg.user.studentProfile?.cohort
     }
   }));
 
@@ -497,7 +501,8 @@ export const getAllEventsWithRegistrations = async (filters = {}) => {
         yearOfStudy: reg.user.studentProfile?.yearOfStudy,
         programme: reg.user.studentProfile?.programme,
         section: reg.user.studentProfile?.section,
-        cohort: reg.user.studentProfile?.cohort
+        // Same course+batch-scoped preference as getEventWithRegistrations above.
+        cohort: event.batch || reg.user.studentProfile?.cohort
       }
     })),
     registrationStats: {
@@ -685,7 +690,9 @@ export const getWorkshopAnalyticsTable = async () => {
         name: reg.user.name,
         email: reg.user.email,
         rollNo: reg.user.studentProfile?.rollNumber || "—",
-        batch: reg.user.studentProfile?.cohort || "—",
+        // Prefer this event's own course+batch-scoped batch over the student's
+        // flat StudentProfile.cohort — see getEventWithRegistrations for why.
+        batch: event.batch || reg.user.studentProfile?.cohort || "—",
         attendanceStatus: attendanceMap[reg.userId] || "NOT_MARKED",
         quizCompleted: progress?.completed || false,
         score: progress?.marks ?? null,
@@ -989,7 +996,9 @@ export const generateExcelExport = async () => {
         email: reg.user.email,
         programme: sp?.programme || '—',
         dept: sp?.department || '—',
-        batch: sp?.cohort || '—',
+        // Prefer this event's own course+batch-scoped batch over the student's
+        // flat StudentProfile.cohort — see getEventWithRegistrations for why.
+        batch: event.batch || sp?.cohort || '—',
         courseCode: event.course?.code || '—',
         workshop: event.title,
         date: fmtDate(event.startAt),
