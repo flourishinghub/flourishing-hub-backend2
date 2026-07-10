@@ -1,7 +1,23 @@
 import cron from "node-cron";
 import { prisma } from "../database/prisma.js";
-import { sendReminderEmail } from "../services/email.service.js";
+import { sendReminderEmail, sendTodayReminderEmail } from "../services/email.service.js";
 import { createNotificationsForUsers } from "../services/notification.service.js";
+
+// IST is UTC+5:30 — "today" for a morning-of reminder means the IST calendar
+// day, not the server's (UTC on Render) calendar day, which would roll over
+// 5.5 hours early and miss/misfire around midnight IST.
+const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
+
+const getTodayIstBounds = () => {
+  const istNow = new Date(Date.now() + IST_OFFSET_MS);
+  const y = istNow.getUTCFullYear();
+  const m = istNow.getUTCMonth();
+  const d = istNow.getUTCDate();
+  return {
+    from: new Date(Date.UTC(y, m, d, 0, 0, 0, 0) - IST_OFFSET_MS),
+    to: new Date(Date.UTC(y, m, d, 23, 59, 59, 999) - IST_OFFSET_MS)
+  };
+};
 
 const sendRemindersForWindow = async (fromOffset, toOffset, label) => {
   const now = new Date();
@@ -46,7 +62,48 @@ const sendRemindersForWindow = async (fromOffset, toOffset, label) => {
   }
 };
 
-// Runs every hour at minute 0
+// Every event scheduled anywhere in today's IST calendar day gets one
+// same-day morning email, separate from (and in addition to) the 24h/1h
+// countdown reminders below.
+const sendMorningOfReminders = async () => {
+  const { from, to } = getTodayIstBounds();
+
+  const todaysEvents = await prisma.event.findMany({
+    where: { status: "PUBLISHED", startAt: { gte: from, lte: to } },
+    include: {
+      registrations: { include: { user: { select: { id: true, name: true, email: true } } } },
+      assignments: { include: { user: { select: { id: true, name: true, email: true } } } }
+    }
+  });
+
+  for (const event of todaysEvents) {
+    const allUsers = [
+      ...event.registrations.map(r => r.user),
+      ...event.assignments.map(a => a.user)
+    ];
+    const uniqueUsers = [...new Map(allUsers.map(u => [u.id, u])).values()];
+    const userIds = uniqueUsers.map(u => u.id);
+
+    if (userIds.length) {
+      await createNotificationsForUsers(
+        userIds,
+        "REMINDER",
+        `📅 Today: ${event.title}`,
+        `Your workshop "${event.title}" is today at ${new Date(event.startAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })} IST${event.venue ? ` — ${event.venue}` : ''}.`,
+        event.id
+      ).catch(() => {});
+    }
+
+    for (const user of uniqueUsers) {
+      sendTodayReminderEmail(user.email, user.name, event.title, event.startAt, event.venue).catch(() => {});
+    }
+
+    console.log(`[morning-of] Sent today's-event reminders for: ${event.title} (${uniqueUsers.length} users)`);
+  }
+};
+
+// Runs every hour at minute 0, plus a dedicated daily run at 8:00 AM IST
+// (02:30 UTC) for the same-day morning reminder.
 export const startReminderCron = () => {
   cron.schedule("0 * * * *", async () => {
     try {
@@ -59,5 +116,18 @@ export const startReminderCron = () => {
     }
   });
 
-  console.log("Reminder cron job started (runs every hour — 24h & 1h reminders)");
+  // Explicit UTC timezone — this is the one schedule here that depends on
+  // firing at an absolute instant (8:00 AM IST = 02:30 UTC); the hourly job
+  // above doesn't care what timezone the server clock is in, but this one
+  // would silently fire at the wrong IST time if the server's local zone
+  // isn't UTC.
+  cron.schedule("30 2 * * *", async () => {
+    try {
+      await sendMorningOfReminders();
+    } catch (err) {
+      console.error("Morning-of reminder cron error:", err);
+    }
+  }, { timezone: "UTC" });
+
+  console.log("Reminder cron job started (runs every hour — 24h & 1h reminders — plus a daily 8:00 AM IST same-day reminder)");
 };
