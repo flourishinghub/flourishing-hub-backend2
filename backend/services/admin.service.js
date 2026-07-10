@@ -1216,6 +1216,8 @@ export const getEventDetailsForAdmin = async (eventId) => {
           markedAt: 'desc'
         }
       },
+      modules: { select: { id: true } },
+      feedbackEntries: { select: { userId: true, eventRating: true, instructorRating: true } },
       _count: {
         select: {
           registrations: true,
@@ -1233,6 +1235,37 @@ export const getEventDetailsForAdmin = async (eventId) => {
     throw new Error("Event not found");
   }
 
+  // Quiz score (from the Google Form webhook, POST /quiz/submit) is stored
+  // as ModuleProgress against this event's EventModule(s) — not the event
+  // itself — so it has to be looked up separately per student. Same for
+  // feedback/rating: it's a submission (via the in-app star widget OR the
+  // POST /quiz/feedback webhook), not something registration alone implies.
+  const moduleIds = event.modules.map((m) => m.id);
+  const studentProfileIds = event.registrations
+    .map((r) => r.user.studentProfile?.id)
+    .filter(Boolean);
+
+  const moduleProgressRows = moduleIds.length && studentProfileIds.length
+    ? await prisma.moduleProgress.findMany({
+        where: { moduleId: { in: moduleIds }, studentProfileId: { in: studentProfileIds } },
+        select: { studentProfileId: true, marksObtained: true, completedAt: true }
+      })
+    : [];
+  const quizByStudentProfileId = new Map(moduleProgressRows.map((p) => [p.studentProfileId, p]));
+  const feedbackByUserId = new Map(event.feedbackEntries.map((f) => [f.userId, f]));
+
+  const registrantsWithQuizAndFeedback = event.registrations.map((r) => {
+    const quiz = r.user.studentProfile ? quizByStudentProfileId.get(r.user.studentProfile.id) : undefined;
+    const feedback = feedbackByUserId.get(r.userId);
+    return {
+      ...r,
+      quizScore: quiz?.marksObtained ?? null,
+      quizSubmittedAt: quiz?.completedAt ?? null,
+      eventRating: feedback?.eventRating ?? null,
+      instructorRating: feedback?.instructorRating ?? null
+    };
+  });
+
   // Format the response
   return {
     id: event.id,
@@ -1246,7 +1279,7 @@ export const getEventDetailsForAdmin = async (eventId) => {
     status: event.status.toLowerCase(),
     registeredCount: event._count.registrations,
     attendedCount: event._count.attendances,
-    registrants: event.registrations,
+    registrants: registrantsWithQuizAndFeedback,
     volunteers: [...event.availabilityResponses, ...event.assignments],
     attendees: event.attendances
   };
