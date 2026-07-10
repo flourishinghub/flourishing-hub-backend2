@@ -2,6 +2,7 @@ import { prisma } from "../database/prisma.js";
 import { parseWorkbookRows, createWorkbookBuffer } from "../utils/excel.js";
 import { ApiError } from "../utils/ApiError.js";
 import { StatusCodes } from "http-status-codes";
+import { notifyCourseBundleRegistration } from "./course.service.js";
 
 const norm = (v) => (v === undefined || v === null ? null : String(v).trim() || null);
 const normLower = (v) => norm(v)?.toLowerCase() ?? null;
@@ -92,10 +93,22 @@ const registerUserForCourseBatchEvents = async (userId, courseId, batchCode) => 
     select: { id: true }
   });
   if (!events.length) return;
+
+  const existingCount = await prisma.eventRegistration.count({
+    where: { userId, eventId: { in: events.map((e) => e.id) } }
+  });
+
   await prisma.eventRegistration.createMany({
     data: events.map((e) => ({ eventId: e.id, userId, status: "REGISTERED" })),
     skipDuplicates: true
   });
+
+  // Only email if this actually registered them into at least one new workshop
+  // (existingCount < events.length) — avoids re-emailing a student who was
+  // already fully registered for this batch's bundle.
+  if (existingCount < events.length) {
+    notifyCourseBundleRegistration([userId], courseId).catch(() => {});
+  }
 };
 
 // Registers every already-matched student of this course + batch into one
@@ -118,10 +131,22 @@ export const registerCourseBatchForEvent = async (eventId, courseId, batchCode) 
   });
   const userIds = [...new Set(assignments.map((a) => a.matchedUserId))];
   if (!userIds.length) return;
+
+  const alreadyRegistered = new Set(
+    (await prisma.eventRegistration.findMany({
+      where: { eventId, userId: { in: userIds } },
+      select: { userId: true }
+    })).map((r) => r.userId)
+  );
+  const newUserIds = userIds.filter((id) => !alreadyRegistered.has(id));
+  if (!newUserIds.length) return;
+
   await prisma.eventRegistration.createMany({
-    data: userIds.map((userId) => ({ eventId, userId, status: "REGISTERED" })),
+    data: newUserIds.map((userId) => ({ eventId, userId, status: "REGISTERED" })),
     skipDuplicates: true
   });
+
+  notifyCourseBundleRegistration(newUserIds, courseId).catch(() => {});
 };
 
 // courseId is required — every batch upload now belongs to a course (selected

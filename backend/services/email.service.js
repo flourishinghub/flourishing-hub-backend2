@@ -537,6 +537,46 @@ export const sendCourseBundleEmail = async (email, name, courseTitle, courseCode
   }
 };
 
+// Send staff assignment email (Instructor / Associate Instructor / Volunteer)
+export const sendStaffAssignmentEmail = async (email, name, role, eventTitle, eventDate, eventVenue) => {
+  try {
+    const transporter = createTransporter();
+    if (!transporter) return true;
+    const roleLabel = role === "INSTRUCTOR" ? "Instructor" : role === "ASSOCIATE_INSTRUCTOR" ? "Associate Instructor" : "Volunteer";
+    const formattedDate = new Date(eventDate).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
+    const mailOptions = {
+      from: `"Flourishing Hub, IIT Bombay" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: `You've Been Assigned as ${roleLabel}: ${eventTitle}`,
+      html: `<!DOCTYPE html><html><head><style>
+        body{font-family:Arial,sans-serif;line-height:1.6;color:#333}
+        .container{max-width:600px;margin:0 auto;padding:20px;background:#f9f9f9}
+        .header{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;padding:30px;text-align:center;border-radius:10px 10px 0 0}
+        .content{background:white;padding:30px;border-radius:0 0 10px 10px}
+        .box{background:#f0f7ff;border-left:4px solid #667eea;padding:15px;margin:20px 0;border-radius:0 8px 8px 0}
+      </style></head><body><div class="container">
+        <div class="header"><h1>📋 New Assignment</h1><p>IIT Bombay Flourishing Hub</p></div>
+        <div class="content">
+          <h2>Hello ${name},</h2>
+          <p>You have been assigned as <strong>${roleLabel}</strong> for the following workshop:</p>
+          <div class="box">
+            <p><strong>📚 Workshop:</strong> ${eventTitle}</p>
+            <p><strong>📅 Date & Time:</strong> ${formattedDate} IST</p>
+            <p><strong>📍 Venue:</strong> ${eventVenue || 'TBD'}</p>
+          </div>
+          <p>Details are available on your Flourishing Hub dashboard.</p>
+          <p>Best regards,<br>Flourishing Hub Team<br>IIT Bombay</p>
+        </div>
+      </div></body></html>`
+    };
+    await transporter.sendMail(mailOptions);
+    return true;
+  } catch (error) {
+    console.error("Error sending staff assignment email:", error);
+    return false;
+  }
+};
+
 // Send password reset email
 export const sendPasswordResetEmail = async (email, name, resetLink) => {
   try {

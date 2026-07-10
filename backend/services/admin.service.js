@@ -4,6 +4,7 @@ import { StatusCodes } from "http-status-codes";
 import { normalizeBatch } from "../utils/normalizeBatch.js";
 import { cascadeBundleRegistrationForNewEvent } from "./course.service.js";
 import { registerCourseBatchForEvent } from "./batchAssignment.service.js";
+import { sendStaffAssignmentEmail } from "./email.service.js";
 
 // Statuses that no longer occupy a seat — excluded from "occupied seat" / capacity counts.
 const INACTIVE_REGISTRATION_STATUSES = ["CANCELLED", "NO_SHOW", "WAITLISTED"];
@@ -115,6 +116,18 @@ export const modifyEvent = async (eventId, eventData, updatedById) => {
         })),
         skipDuplicates: true,
       });
+
+      const staffUsers = await prisma.user.findMany({
+        where: { id: { in: newAssignments.map((a) => a.userId) } },
+        select: { id: true, name: true, email: true }
+      });
+      const staffUserById = new Map(staffUsers.map((u) => [u.id, u]));
+      newAssignments.forEach((a) => {
+        const staffUser = staffUserById.get(a.userId);
+        if (staffUser) {
+          sendStaffAssignmentEmail(staffUser.email, staffUser.name, a.role, event.title, event.startAt, event.venue).catch(() => {});
+        }
+      });
     }
   }
 
@@ -140,13 +153,22 @@ export const assignStaff = async (eventId, userId, role, assignedById) => {
     }
   });
 
+  sendStaffAssignmentEmail(
+    assignment.user.email,
+    assignment.user.name,
+    role,
+    assignment.event.title,
+    assignment.event.startAt,
+    assignment.event.venue
+  ).catch(() => {});
+
   return assignment;
 };
 
 // ASSIGN VOLUNTEERS
 export const assignVolunteers = async (eventId, userIds, assignedById) => {
   const assignments = await Promise.all(
-    userIds.map(userId => 
+    userIds.map(userId =>
       prisma.eventStaffAssignment.create({
         data: {
           eventId,
@@ -161,6 +183,17 @@ export const assignVolunteers = async (eventId, userIds, assignedById) => {
       })
     )
   );
+
+  assignments.forEach((assignment) => {
+    sendStaffAssignmentEmail(
+      assignment.user.email,
+      assignment.user.name,
+      "VOLUNTEER",
+      assignment.event.title,
+      assignment.event.startAt,
+      assignment.event.venue
+    ).catch(() => {});
+  });
 
   return assignments;
 };

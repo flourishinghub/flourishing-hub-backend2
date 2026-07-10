@@ -8,6 +8,7 @@ import { buildPagination } from "../utils/pagination.js";
 import { slugify } from "../utils/slugify.js";
 import { cascadeBundleRegistrationForNewEvent } from "./course.service.js";
 import { normalizeBatch } from "../utils/normalizeBatch.js";
+import { sendStaffAssignmentEmail } from "./email.service.js";
 
 const parseRegistrationNotes = (notes) => {
   if (!notes) {
@@ -146,6 +147,18 @@ export const createEvent = async (payload, createdById) => {
         assignedById: createdById,
       })),
       skipDuplicates: true,
+    });
+
+    const staffUsers = await prisma.user.findMany({
+      where: { id: { in: staffToAssign.map((s) => s.userId) } },
+      select: { id: true, name: true, email: true }
+    });
+    const staffUserById = new Map(staffUsers.map((u) => [u.id, u]));
+    staffToAssign.forEach((s) => {
+      const staffUser = staffUserById.get(s.userId);
+      if (staffUser) {
+        sendStaffAssignmentEmail(staffUser.email, staffUser.name, s.role, event.title, event.startAt, event.venue).catch(() => {});
+      }
     });
   }
 

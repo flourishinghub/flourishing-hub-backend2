@@ -1,6 +1,37 @@
 import { prisma } from "../database/prisma.js";
 import { ApiError } from "../utils/ApiError.js";
 import { StatusCodes } from "http-status-codes";
+import { sendCourseBundleEmail } from "./email.service.js";
+import { createNotificationsForUsers } from "./notification.service.js";
+
+// Sends the course-bundle confirmation email + in-app notification to each
+// given user for a compulsory course. Shared by every AUTO-registration path
+// (bulk-import batch matching, new-workshop cascade, signup auto-match) —
+// registerForEvent (manual registration) already sends its own via
+// registration.service.js, so this is never called for that path to avoid
+// double-emailing the same student.
+export const notifyCourseBundleRegistration = async (userIds, courseId) => {
+  if (!userIds?.length) return;
+  const [course, modules, users] = await Promise.all([
+    prisma.course.findUnique({ where: { id: courseId }, select: { name: true, code: true } }),
+    prisma.courseModule.findMany({ where: { courseId }, orderBy: { order: "asc" }, select: { title: true } }),
+    prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true, email: true } })
+  ]);
+  if (!course || !users.length) return;
+
+  const titles = modules.map((m) => m.title);
+  users.forEach((user) => {
+    sendCourseBundleEmail(user.email, user.name, course.name, course.code, titles).catch(() => {});
+  });
+
+  createNotificationsForUsers(
+    users.map((u) => u.id),
+    "info",
+    `Registered: ${course.name}${course.code ? ` (${course.code})` : ""}`,
+    `Successfully registered for Course Bundle "${course.name}". You are enrolled in all workshops.`,
+    null
+  ).catch(() => {});
+};
 
 export const getAllCourses = async (filters = {}) => {
   const { status } = filters;
@@ -71,10 +102,22 @@ export const cascadeBundleRegistrationForNewEvent = async (eventId) => {
   });
   if (!siblingRegistrations.length) return;
 
+  const userIds = siblingRegistrations.map((r) => r.userId);
+  const alreadyRegistered = new Set(
+    (await prisma.eventRegistration.findMany({
+      where: { eventId, userId: { in: userIds } },
+      select: { userId: true }
+    })).map((r) => r.userId)
+  );
+  const newUserIds = userIds.filter((id) => !alreadyRegistered.has(id));
+  if (!newUserIds.length) return;
+
   await prisma.eventRegistration.createMany({
-    data: siblingRegistrations.map((r) => ({ eventId, userId: r.userId, status: "REGISTERED" })),
+    data: newUserIds.map((userId) => ({ eventId, userId, status: "REGISTERED" })),
     skipDuplicates: true
   });
+
+  notifyCourseBundleRegistration(newUserIds, event.courseId).catch(() => {});
 };
 
 export const getCourseById = async (courseId) => {
