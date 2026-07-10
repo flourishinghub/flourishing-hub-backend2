@@ -67,13 +67,13 @@ export const submitQuizResult = async ({ email, eventId, courseId, eventTitle, s
   });
   if (!event) throw new ApiError(StatusCodes.NOT_FOUND, `No event found with id: ${resolvedEventId}`);
 
-  // Enforce 30-minute grace period
+  // Enforce 5-minute grace period
   if (event.endAt) {
-    const gracePeriodEnd = new Date(new Date(event.endAt).getTime() + 30 * 60 * 1000);
+    const gracePeriodEnd = new Date(new Date(event.endAt).getTime() + 5 * 60 * 1000);
     if (new Date() > gracePeriodEnd) {
       throw new ApiError(
         StatusCodes.GONE,
-        "Submission window has closed. The 30-minute grace period after the session has expired."
+        "Submission window has closed. The 5-minute grace period after the session has expired."
       );
     }
   }

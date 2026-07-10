@@ -128,7 +128,7 @@ Submit a real test response (your own account works). Then:
 | 404 "No user found with email..." | Email question wasn't answered, or doesn't match a real account's email exactly |
 | 404 "No event found with id..." (Setup 1) | Wrong `EVENT_ID` — re-check step 3 |
 | 404 "Could not find a workshop under this course..." (Setup 2) | Wrong `COMPULSORY_COURSE_ID`, `WORKSHOP_TITLE` doesn't exactly match the Event title, or the student isn't actually registered for any of that course's batch events |
-| 410 "Submission window has closed" | Quiz submissions are only accepted until 30 minutes after the workshop's scheduled end time |
+| 410 "Submission window has closed" | Quiz submissions are only accepted until 5 minutes after the workshop's scheduled end time |
 | Quiz score never appears despite quiz questions | Settings → Quizzes → "Make this a quiz" is off for *this specific copy* — it's per-form, doesn't carry a default |
 
 ## Where this data lives
