@@ -2,6 +2,8 @@ import { prisma } from "../database/prisma.js";
 import { ApiError } from "../utils/ApiError.js";
 import { StatusCodes } from "http-status-codes";
 import { normalizeBatch } from "../utils/normalizeBatch.js";
+import { cascadeBundleRegistrationForNewEvent } from "./course.service.js";
+import { registerCourseBatchForEvent } from "./batchAssignment.service.js";
 
 // Statuses that no longer occupy a seat — excluded from "occupied seat" / capacity counts.
 const INACTIVE_REGISTRATION_STATUSES = ["CANCELLED", "NO_SHOW", "WAITLISTED"];
@@ -40,6 +42,16 @@ export const createEvent = async (eventData, createdById) => {
     });
 
     console.log("✅ Event created successfully in DB:", event.id);
+
+    // Same two cascades bulk-import already gets — this single-event path
+    // (the admin "Create Event" modal) was missing both, so a manually
+    // created compulsory workshop for an existing course+batch never
+    // auto-registered anyone, defeating the point of "Compulsory Bundle".
+    if (event.batch && event.courseId) {
+      registerCourseBatchForEvent(event.id, event.courseId, event.batch).catch(() => {});
+    }
+    cascadeBundleRegistrationForNewEvent(event.id).catch(() => {});
+
     return event;
   } catch (error) {
     console.error("❌ Error creating event:", error);
