@@ -4,7 +4,45 @@ import { ApiError } from "../utils/ApiError.js";
 import { sendQuizResultEmail } from "./email.service.js";
 import { createNotification } from "./notification.service.js";
 
-export const submitQuizResult = async ({ email, eventId, score, secret }) => {
+// A compulsory bundle course gets bulk-imported as one Event PER BATCH —
+// e.g. "Module 1" scheduled 4 times, once per batch, each with its own
+// Event id. A single Google Form shared across all those batches (the
+// realistic setup — same quiz content, different batch/time) can't know
+// which specific batch-Event a given submission belongs to ahead of time.
+// Resolves it here instead: given the course + this workshop's title, find
+// the one Event under that course the SUBMITTING STUDENT is actually
+// registered for — since a student only ever belongs to one batch, this is
+// unambiguous without the Apps Script needing per-batch configuration.
+// Falls back to plain eventId for standalone/optional single-event
+// workshops (no course, or a course with only one batch), where a fixed
+// eventId is simpler and unambiguous.
+const resolveEventId = async ({ eventId, courseId, eventTitle, userId }) => {
+  if (eventId) return eventId;
+  if (!courseId) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, "Either eventId or courseId is required");
+  }
+
+  const event = await prisma.event.findFirst({
+    where: {
+      courseId,
+      ...(eventTitle ? { title: { equals: eventTitle, mode: "insensitive" } } : {}),
+      registrations: { some: { userId } }
+    },
+    select: { id: true }
+  });
+
+  if (!event) {
+    throw new ApiError(
+      StatusCodes.NOT_FOUND,
+      "Could not find a workshop under this course that this student is registered for" +
+        (eventTitle ? ` (matching title "${eventTitle}")` : "") +
+        " — check the course ID, workshop title, and that the student is actually registered."
+    );
+  }
+  return event.id;
+};
+
+export const submitQuizResult = async ({ email, eventId, courseId, eventTitle, score, secret }) => {
   // Validate webhook secret
   const expectedSecret = process.env.QUIZ_WEBHOOK_SECRET;
   if (!expectedSecret || secret !== expectedSecret) {
@@ -20,12 +58,14 @@ export const submitQuizResult = async ({ email, eventId, score, secret }) => {
   if (!user) throw new ApiError(StatusCodes.NOT_FOUND, `No user found with email: ${email}`);
   if (!user.studentProfile) throw new ApiError(StatusCodes.NOT_FOUND, "Student profile not found");
 
+  const resolvedEventId = await resolveEventId({ eventId, courseId, eventTitle, userId: user.id });
+
   // Fetch event with course to determine pass threshold
   const event = await prisma.event.findUnique({
-    where: { id: eventId },
+    where: { id: resolvedEventId },
     include: { course: { select: { id: true, isCompulsory: true } } }
   });
-  if (!event) throw new ApiError(StatusCodes.NOT_FOUND, `No event found with id: ${eventId}`);
+  if (!event) throw new ApiError(StatusCodes.NOT_FOUND, `No event found with id: ${resolvedEventId}`);
 
   // Enforce 30-minute grace period
   if (event.endAt) {
@@ -44,14 +84,14 @@ export const submitQuizResult = async ({ email, eventId, score, secret }) => {
 
   // Find or auto-create the event module
   let eventModule = await prisma.eventModule.findFirst({
-    where: { eventId },
+    where: { eventId: resolvedEventId },
     orderBy: { startAt: "asc" }
   });
 
   if (!eventModule) {
     eventModule = await prisma.eventModule.create({
       data: {
-        eventId,
+        eventId: resolvedEventId,
         title: event.title,
         startAt: event.startAt,
         endAt: event.endAt ?? event.startAt,
@@ -79,7 +119,7 @@ export const submitQuizResult = async ({ email, eventId, score, secret }) => {
   if (!passed) {
     // Revert attendance to ABSENT on failure
     const attendanceRecord = await prisma.attendanceRecord.findFirst({
-      where: { eventId, userId: user.id }
+      where: { eventId: resolvedEventId, userId: user.id }
     });
     if (attendanceRecord) {
       await prisma.attendanceRecord.update({
@@ -88,7 +128,7 @@ export const submitQuizResult = async ({ email, eventId, score, secret }) => {
       });
     }
     await prisma.eventRegistration.updateMany({
-      where: { eventId, userId: user.id },
+      where: { eventId: resolvedEventId, userId: user.id },
       data: { status: 'REGISTERED' }
     });
   }
@@ -104,13 +144,13 @@ export const submitQuizResult = async ({ email, eventId, score, secret }) => {
     passed
       ? `You scored ${score}/${PASSING_SCORE <= 3 ? 5 : 5} and passed the workshop. Great work!`
       : `You scored ${score}/5 (minimum ${PASSING_SCORE}/5 required). Consider registering for a repeat session.`,
-    eventId
+    resolvedEventId
   ).catch(() => {});
 
   return {
     studentName: user.name,
     email: user.email,
-    eventId,
+    eventId: resolvedEventId,
     moduleId: eventModule.id,
     marksObtained: progress.marksObtained,
     maxMarks: eventModule.maxMarks,
@@ -122,7 +162,7 @@ export const submitQuizResult = async ({ email, eventId, score, secret }) => {
 // Webhook counterpart of the in-app star-rating flow (services/operation.service.js:submitFeedback),
 // but driven by a Google Form response instead of the student UI. Used for both compulsory workshops
 // (rating alongside the quiz score above) and optional workshops (rating only, no quiz/pass threshold).
-export const submitFormFeedback = async ({ email, eventId, eventRating, instructorRating, eventComment, instructorComment, secret }) => {
+export const submitFormFeedback = async ({ email, eventId, courseId, eventTitle, eventRating, instructorRating, eventComment, instructorComment, secret }) => {
   const expectedSecret = process.env.QUIZ_WEBHOOK_SECRET;
   if (!expectedSecret || secret !== expectedSecret) {
     throw new ApiError(StatusCodes.UNAUTHORIZED, "Invalid webhook secret");
@@ -131,8 +171,10 @@ export const submitFormFeedback = async ({ email, eventId, eventRating, instruct
   const user = await prisma.user.findUnique({ where: { email: email.trim().toLowerCase() } });
   if (!user) throw new ApiError(StatusCodes.NOT_FOUND, `No user found with email: ${email}`);
 
+  const resolvedEventId = await resolveEventId({ eventId, courseId, eventTitle, userId: user.id });
+
   const registration = await prisma.eventRegistration.findUnique({
-    where: { eventId_userId: { eventId, userId: user.id } }
+    where: { eventId_userId: { eventId: resolvedEventId, userId: user.id } }
   });
   if (!registration) {
     throw new ApiError(StatusCodes.BAD_REQUEST, "This user is not registered for the given event");
@@ -150,10 +192,10 @@ export const submitFormFeedback = async ({ email, eventId, eventRating, instruct
   };
 
   const feedback = await prisma.feedback.upsert({
-    where: { eventId_userId: { eventId, userId: user.id } },
+    where: { eventId_userId: { eventId: resolvedEventId, userId: user.id } },
     update: payload,
-    create: { eventId, userId: user.id, ...payload }
+    create: { eventId: resolvedEventId, userId: user.id, ...payload }
   });
 
-  return { studentName: user.name, email: user.email, eventId, feedbackId: feedback.id, eventRating: feedback.eventRating };
+  return { studentName: user.name, email: user.email, eventId: resolvedEventId, feedbackId: feedback.id, eventRating: feedback.eventRating };
 };

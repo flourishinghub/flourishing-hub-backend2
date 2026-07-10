@@ -4,12 +4,15 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 
 export const submitQuizResultController = asyncHandler(async (req, res) => {
-  const { email, eventId, score, secret } = req.body;
+  const { email, eventId, courseId, eventTitle, score, secret } = req.body;
 
-  if (!email || !eventId || score === undefined || score === null || !secret) {
+  // Either eventId (single/optional workshop) or courseId (compulsory
+  // course bundled across multiple per-batch events — resolved server-side
+  // to whichever one this student is registered for) is required.
+  if (!email || (!eventId && !courseId) || score === undefined || score === null || !secret) {
     return res.status(StatusCodes.BAD_REQUEST).json({
       success: false,
-      message: "email, eventId, score, and secret are required"
+      message: "email, (eventId or courseId), score, and secret are required"
     });
   }
 
@@ -21,6 +24,8 @@ export const submitQuizResultController = asyncHandler(async (req, res) => {
   const result = await submitQuizResult({
     email,
     eventId,
+    courseId,
+    eventTitle,
     score: numericScore,
     secret
   });
@@ -36,18 +41,20 @@ export const submitQuizResultController = asyncHandler(async (req, res) => {
 // used for compulsory workshops (alongside the quiz score above) and optional
 // workshops (rating only, no quiz).
 export const submitFormFeedbackController = asyncHandler(async (req, res) => {
-  const { email, eventId, eventRating, instructorRating, eventComment, instructorComment, secret } = req.body;
+  const { email, eventId, courseId, eventTitle, eventRating, instructorRating, eventComment, instructorComment, secret } = req.body;
 
-  if (!email || !eventId || eventRating === undefined || eventRating === null || !secret) {
+  if (!email || (!eventId && !courseId) || eventRating === undefined || eventRating === null || !secret) {
     return res.status(StatusCodes.BAD_REQUEST).json({
       success: false,
-      message: "email, eventId, eventRating, and secret are required"
+      message: "email, (eventId or courseId), eventRating, and secret are required"
     });
   }
 
   const result = await submitFormFeedback({
     email,
     eventId,
+    courseId,
+    eventTitle,
     eventRating: Number(eventRating),
     instructorRating,
     eventComment,

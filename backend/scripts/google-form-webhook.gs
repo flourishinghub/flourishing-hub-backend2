@@ -26,10 +26,27 @@
 const BACKEND_URL = 'https://flourishing-hub-backend2-xif0.onrender.com/api/v1';
 const WEBHOOK_SECRET = 'fh-quiz-secret-2026-iitbfh';
 
-// ─── This is the ONE line you change every time you copy this form for a
-// new workshop. Get it from the admin panel: Events → click the workshop
-// → the URL is .../admin/events/<EVENT_ID>. ───
-const EVENT_ID = 'PASTE_THE_EVENT_ID_HERE';
+// ─── Fill in EXACTLY ONE of these two setups — whichever matches this
+// workshop. Leave the other one's fields blank ('').
+//
+// SETUP 1 — single or optional workshop (just one Event, not scheduled
+// per-batch). Use EVENT_ID.
+//
+// SETUP 2 — compulsory course bundle bulk-imported across MULTIPLE
+// batches (e.g. "Module 1" run 4 times, once per batch — 4 separate
+// Events, same title). Use COMPULSORY_COURSE_ID + WORKSHOP_TITLE instead
+// — ONE Google Form then works for every batch: the backend figures out
+// which specific batch-Event a submission belongs to from which one the
+// submitting student is actually registered for. You do NOT need a
+// separate form per batch.
+// ───
+
+// SETUP 1
+const EVENT_ID = ''; // from admin panel: Events → click the workshop → .../admin/events/<EVENT_ID>
+
+// SETUP 2
+const COMPULSORY_COURSE_ID = ''; // from admin panel: Courses → click the course → .../admin (check the course's id in its edit/API response, or ask an admin who set it up)
+const WORKSHOP_TITLE = ''; // must exactly match the Event title used across all of that course's batches, e.g. "Module 1"
 
 // Question title must CONTAIN one of these (case-insensitive) to be
 // recognised as the student's email — edit if your form uses different wording.
@@ -64,12 +81,21 @@ function installFormSubmitTrigger() {
   Logger.log('Trigger installed on form: ' + form.getTitle());
 }
 
+// Returns { eventId } for Setup 1, or { courseId, eventTitle } for Setup 2,
+// or null if neither is configured.
+function getWorkshopIdentifier() {
+  if (EVENT_ID) return { eventId: EVENT_ID };
+  if (COMPULSORY_COURSE_ID && WORKSHOP_TITLE) return { courseId: COMPULSORY_COURSE_ID, eventTitle: WORKSHOP_TITLE };
+  return null;
+}
+
 function onFormSubmitHandler(e) {
   try {
-    if (!EVENT_ID || EVENT_ID === 'PASTE_THE_EVENT_ID_HERE') {
-      Logger.log('EVENT_ID is not set — this form was probably just copied from the master template. ' +
-        'Open Extensions/Script editor, set EVENT_ID at the top of the script to this workshop\'s event ID, ' +
-        'then run installFormSubmitTrigger once more.');
+    const identifier = getWorkshopIdentifier();
+    if (!identifier) {
+      Logger.log('Neither EVENT_ID nor COMPULSORY_COURSE_ID+WORKSHOP_TITLE is set — this form was probably ' +
+        'just copied from the master template. Open Extensions/Script editor, fill in ONE of the two setups ' +
+        'at the top of the script, then run installFormSubmitTrigger once more.');
       return;
     }
 
@@ -103,12 +129,11 @@ function onFormSubmitHandler(e) {
 
       if (maxScore > 0) {
         const scoreOutOf5 = Math.round((totalScore / maxScore) * 5);
-        results.push(postToBackend('/quiz/submit', {
+        results.push(postToBackend('/quiz/submit', Object.assign({
           email: email,
-          eventId: EVENT_ID,
           score: scoreOutOf5,
           secret: WEBHOOK_SECRET,
-        }));
+        }, identifier)));
       }
     }
 
@@ -116,12 +141,11 @@ function onFormSubmitHandler(e) {
     const eventRating = findAnswerByTitleKeywords(itemResponses, RATING_TITLE_KEYWORDS);
     if (eventRating) {
       const instructorRating = findAnswerByTitleKeywords(itemResponses, INSTRUCTOR_RATING_TITLE_KEYWORDS);
-      const feedbackPayload = {
+      const feedbackPayload = Object.assign({
         email: email,
-        eventId: EVENT_ID,
         eventRating: Number(eventRating),
         secret: WEBHOOK_SECRET,
-      };
+      }, identifier);
       if (instructorRating) feedbackPayload.instructorRating = Number(instructorRating);
       results.push(postToBackend('/quiz/feedback', feedbackPayload));
     }
