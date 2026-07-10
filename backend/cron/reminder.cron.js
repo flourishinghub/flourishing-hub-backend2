@@ -1,6 +1,6 @@
 import cron from "node-cron";
 import { prisma } from "../database/prisma.js";
-import { sendReminderEmail, sendTodayReminderEmail } from "../services/email.service.js";
+import { sendReminderEmail, sendTodayReminderEmail, sendSessionCompletedEmail } from "../services/email.service.js";
 import { createNotificationsForUsers } from "../services/notification.service.js";
 
 // IST is UTC+5:30 — "today" for a morning-of reminder means the IST calendar
@@ -102,6 +102,58 @@ const sendMorningOfReminders = async () => {
   }
 };
 
+// Sends a "session completed" email 5 minutes after an event's endAt, once
+// per event. Bounded to a 6–20-min-ago window (not just "endAt in the past")
+// so a fresh deploy/restart never mass-emails every historical event that
+// happens to still have completionEmailSentAt unset — and completionEmailSentAt
+// itself is the de-dupe guard against re-sending on the next tick.
+export const sendSessionCompletedNotices = async () => {
+  const now = new Date();
+  const endedAfter = new Date(now.getTime() - 20 * 60 * 1000);
+  const endedBefore = new Date(now.getTime() - 6 * 60 * 1000);
+
+  const justCompletedEvents = await prisma.event.findMany({
+    where: {
+      status: { not: "CANCELLED" },
+      endAt: { gte: endedAfter, lte: endedBefore },
+      completionEmailSentAt: null
+    },
+    include: {
+      registrations: { include: { user: { select: { id: true, name: true, email: true } } } },
+      assignments: { include: { user: { select: { id: true, name: true, email: true } } } }
+    }
+  });
+
+  for (const event of justCompletedEvents) {
+    // Mark first, before sending — if a send fails/hangs partway through the
+    // user list, the next tick shouldn't re-email everyone who already got it.
+    await prisma.event.update({ where: { id: event.id }, data: { completionEmailSentAt: now } });
+
+    const allUsers = [
+      ...event.registrations.map(r => r.user),
+      ...event.assignments.map(a => a.user)
+    ];
+    const uniqueUsers = [...new Map(allUsers.map(u => [u.id, u])).values()];
+    const userIds = uniqueUsers.map(u => u.id);
+
+    if (userIds.length) {
+      await createNotificationsForUsers(
+        userIds,
+        "REMINDER",
+        `✅ Session Completed: ${event.title}`,
+        `Your workshop "${event.title}" has ended${event.venue ? ` — ${event.venue}` : ''}.`,
+        event.id
+      ).catch(() => {});
+    }
+
+    for (const user of uniqueUsers) {
+      sendSessionCompletedEmail(user.email, user.name, event.title, event.startAt, event.venue).catch(() => {});
+    }
+
+    console.log(`[session-completed] Sent completion notice for: ${event.title} (${uniqueUsers.length} users)`);
+  }
+};
+
 // Runs every hour at minute 0, plus a dedicated daily run at 8:00 AM IST
 // (02:30 UTC) for the same-day morning reminder.
 export const startReminderCron = () => {
@@ -129,5 +181,15 @@ export const startReminderCron = () => {
     }
   }, { timezone: "UTC" });
 
-  console.log("Reminder cron job started (runs every hour — 24h & 1h reminders — plus a daily 8:00 AM IST same-day reminder)");
+  // Every minute — the 5-minutes-after-completion email needs much tighter
+  // timing than the hourly job above can give.
+  cron.schedule("* * * * *", async () => {
+    try {
+      await sendSessionCompletedNotices();
+    } catch (err) {
+      console.error("Session-completed reminder cron error:", err);
+    }
+  });
+
+  console.log("Reminder cron job started (runs every hour — 24h & 1h reminders — plus a daily 8:00 AM IST same-day reminder — plus a per-minute session-completed check)");
 };

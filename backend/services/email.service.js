@@ -507,6 +507,58 @@ export const sendTodayReminderEmail = async (email, name, eventTitle, eventDate,
   }
 };
 
+// Send session-completed email — 5 minutes after an event's endAt, once
+// per event, to everyone who was registered/assigned to it.
+export const sendSessionCompletedEmail = async (email, name, eventTitle, eventDate, eventVenue) => {
+  try {
+    const transporter = createTransporter();
+    if (!transporter) {
+      console.log(`Session-completed email skipped for ${email} (email not configured)`);
+      return true;
+    }
+    const formattedDate = new Date(eventDate).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
+    const mailOptions = {
+      from: `"Flourishing Hub, IIT Bombay" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: `Session Completed: ${eventTitle}`,
+      html: `
+        <!DOCTYPE html><html><head><style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9; }
+          .header { background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+          .content { background: white; padding: 30px; border-radius: 0 0 10px 10px; }
+          .event-box { background: #f0fdf4; border-left: 4px solid #10b981; padding: 15px; margin: 20px 0; border-radius: 0 8px 8px 0; }
+          .tagline { font-style: italic; color: white; margin-top: 10px; }
+        </style></head><body>
+          <div class="container">
+            <div class="header">
+              <h1>✅ Session Completed</h1>
+              <p>IIT Bombay</p>
+              <p class="tagline">Let's Thrive, Not Just Survive</p>
+            </div>
+            <div class="content">
+              <h2>Hello ${name},</h2>
+              <p>This workshop has now ended:</p>
+              <div class="event-box">
+                <p><strong>📚 Workshop:</strong> ${eventTitle}</p>
+                <p><strong>📅 Date & Time:</strong> ${formattedDate} IST</p>
+                <p><strong>📍 Venue:</strong> ${eventVenue || 'TBD'}</p>
+              </div>
+              <p>You can view your check-in status, quiz score and feedback for this session on your Flourishing Hub dashboard.</p>
+              <p>Best regards,<br>Flourishing Hub Team<br>IIT Bombay</p>
+            </div>
+          </div>
+        </body></html>
+      `
+    };
+    await transporter.sendMail(mailOptions);
+    return true;
+  } catch (error) {
+    console.error("Error sending session-completed email:", error);
+    return false;
+  }
+};
+
 // Send quiz result email (pass or fail)
 export const sendQuizResultEmail = async (email, name, eventTitle, passed, score, passingScore) => {
   try {

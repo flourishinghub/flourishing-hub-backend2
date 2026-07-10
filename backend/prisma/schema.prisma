@@ -231,6 +231,7 @@ model Event {
   courseId              String?
   courseModuleId        String?
   batch                 String?
+  completionEmailSentAt DateTime?
   createdAt             DateTime               @default(now())
   updatedAt             DateTime               @updatedAt
   createdBy             User                   @relation("EventCreatedBy", fields: [createdById], references: [id])
