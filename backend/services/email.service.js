@@ -190,7 +190,7 @@ export const sendWelcomeEmail = async (email, name, role) => {
         <body>
           <div class="container">
             <div class="header">
-              <h1>🎉 Welcome to Flourishing Hub!</h1>
+              <h1>Welcome to Flourishing Hub</h1>
               <p>IIT Bombay</p>
               <p class="tagline">Let's Thrive, Not Just Survive</p>
             </div>
@@ -256,7 +256,7 @@ export const sendApprovalEmail = async (email, name) => {
         <body>
           <div class="container">
             <div class="header">
-              <h1>🎉 Account Approved!</h1>
+              <h1>Account Approved</h1>
               <p>IIT Bombay</p>
               <p class="tagline">Let's Thrive, Not Just Survive</p>
             </div>
@@ -376,7 +376,7 @@ export const sendRegistrationConfirmationEmail = async (email, name, eventTitle,
         </style></head><body>
           <div class="container">
             <div class="header">
-              <h1>✅ Registration Confirmed!</h1>
+              <h1>Registration Confirmed</h1>
               <p>IIT Bombay</p>
               <p class="tagline">Let's Thrive, Not Just Survive</p>
             </div>
@@ -384,9 +384,9 @@ export const sendRegistrationConfirmationEmail = async (email, name, eventTitle,
               <h2>Hello ${name},</h2>
               <p>You have successfully registered for the following workshop:</p>
               <div class="event-box">
-                <p><strong>📚 Workshop:</strong> ${eventTitle}</p>
-                <p><strong>📅 Date & Time:</strong> ${formattedDate} IST</p>
-                <p><strong>📍 Venue:</strong> ${eventVenue || 'TBD'}</p>
+                <p><strong>Workshop:</strong> ${eventTitle}</p>
+                <p><strong>Date & Time:</strong> ${formattedDate} IST</p>
+                <p><strong>Venue:</strong> ${eventVenue || 'TBD'}</p>
               </div>
               <p>Please arrive on time. You will need to check in on the website when the session goes live.</p>
               <p>Best regards,<br>Flourishing Hub Team<br>IIT Bombay</p>
@@ -427,7 +427,7 @@ export const sendReminderEmail = async (email, name, eventTitle, eventDate, even
         </style></head><body>
           <div class="container">
             <div class="header">
-              <h1>⏰ Workshop Reminder</h1>
+              <h1>Workshop Reminder</h1>
               <p>IIT Bombay</p>
               <p class="tagline">Let's Thrive, Not Just Survive</p>
             </div>
@@ -435,9 +435,9 @@ export const sendReminderEmail = async (email, name, eventTitle, eventDate, even
               <h2>Hello ${name},</h2>
               <p>This is a friendly reminder that you have a workshop <strong>tomorrow</strong>:</p>
               <div class="event-box">
-                <p><strong>📚 Workshop:</strong> ${eventTitle}</p>
-                <p><strong>📅 Date & Time:</strong> ${formattedDate} IST</p>
-                <p><strong>📍 Venue:</strong> ${eventVenue || 'TBD'}</p>
+                <p><strong>Workshop:</strong> ${eventTitle}</p>
+                <p><strong>Date & Time:</strong> ${formattedDate} IST</p>
+                <p><strong>Venue:</strong> ${eventVenue || 'TBD'}</p>
               </div>
               <p>Remember to check in on the Flourishing Hub website when the session goes live.</p>
               <p>Best regards,<br>Flourishing Hub Team<br>IIT Bombay</p>
@@ -480,7 +480,7 @@ export const sendTodayReminderEmail = async (email, name, eventTitle, eventDate,
         </style></head><body>
           <div class="container">
             <div class="header">
-              <h1>📅 Today's Workshop</h1>
+              <h1>Today's Workshop</h1>
               <p>IIT Bombay</p>
               <p class="tagline">Let's Thrive, Not Just Survive</p>
             </div>
@@ -488,9 +488,9 @@ export const sendTodayReminderEmail = async (email, name, eventTitle, eventDate,
               <h2>Good morning ${name},</h2>
               <p>This is a reminder that you have a workshop <strong>today</strong>:</p>
               <div class="event-box">
-                <p><strong>📚 Workshop:</strong> ${eventTitle}</p>
-                <p><strong>🕐 Time:</strong> ${formattedTime} IST</p>
-                <p><strong>📍 Venue:</strong> ${eventVenue || 'TBD'}</p>
+                <p><strong>Workshop:</strong> ${eventTitle}</p>
+                <p><strong>Time:</strong> ${formattedTime} IST</p>
+                <p><strong>Venue:</strong> ${eventVenue || 'TBD'}</p>
               </div>
               <p>Remember to check in on the Flourishing Hub website when the session goes live.</p>
               <p>Best regards,<br>Flourishing Hub Team<br>IIT Bombay</p>
@@ -532,7 +532,7 @@ export const sendSessionCompletedEmail = async (email, name, eventTitle, eventDa
         </style></head><body>
           <div class="container">
             <div class="header">
-              <h1>✅ Session Completed</h1>
+              <h1>Session Completed</h1>
               <p>IIT Bombay</p>
               <p class="tagline">Let's Thrive, Not Just Survive</p>
             </div>
@@ -540,9 +540,9 @@ export const sendSessionCompletedEmail = async (email, name, eventTitle, eventDa
               <h2>Hello ${name},</h2>
               <p>This workshop has now ended:</p>
               <div class="event-box">
-                <p><strong>📚 Workshop:</strong> ${eventTitle}</p>
-                <p><strong>📅 Date & Time:</strong> ${formattedDate} IST</p>
-                <p><strong>📍 Venue:</strong> ${eventVenue || 'TBD'}</p>
+                <p><strong>Workshop:</strong> ${eventTitle}</p>
+                <p><strong>Date & Time:</strong> ${formattedDate} IST</p>
+                <p><strong>Venue:</strong> ${eventVenue || 'TBD'}</p>
               </div>
               <p>You can view your check-in status, quiz score and feedback for this session on your Flourishing Hub dashboard.</p>
               <p>Best regards,<br>Flourishing Hub Team<br>IIT Bombay</p>
@@ -565,7 +565,7 @@ export const sendQuizResultEmail = async (email, name, eventTitle, passed, score
     const transporter = createTransporter();
     if (!transporter) return true;
     const color = passed ? '#10b981' : '#ef4444';
-    const badge = passed ? '🟩 Workshop Completed' : '🟥 Workshop Unsuccessful';
+    const badge = passed ? 'Workshop Completed' : 'Workshop Unsuccessful';
     const mailOptions = {
       from: `"Flourishing Hub, IIT Bombay" <${process.env.EMAIL_USER}>`,
       to: email,
@@ -584,10 +584,10 @@ export const sendQuizResultEmail = async (email, name, eventTitle, passed, score
             ? `<p>Congratulations! You have successfully completed the workshop and your transcript has been updated.</p>`
             : `<p>Unfortunately, you did not meet the passing criteria for this workshop. We encourage you to register again.</p>`}
           <div class="box">
-            <p><strong>📚 Workshop:</strong> ${eventTitle}</p>
-            <p><strong>📊 Your Score:</strong> ${score} / 5</p>
-            <p><strong>✅ Passing Score:</strong> ${passingScore} / 5</p>
-            <p><strong>🏆 Result:</strong> ${passed ? 'PASSED' : 'FAILED'}</p>
+            <p><strong>Workshop:</strong> ${eventTitle}</p>
+            <p><strong>Your Score:</strong> ${score} / 5</p>
+            <p><strong>Passing Score:</strong> ${passingScore} / 5</p>
+            <p><strong>Result:</strong> ${passed ? 'PASSED' : 'FAILED'}</p>
           </div>
           ${!passed ? `<p>You can register for a repeated session of this workshop via the course catalog.</p>` : ''}
           <p>Best regards,<br>Flourishing Hub Team<br>IIT Bombay</p>
@@ -620,13 +620,13 @@ export const sendCourseBundleEmail = async (email, name, courseTitle, courseCode
         .box{background:#f0f7ff;border-left:4px solid #667eea;padding:15px;margin:20px 0;border-radius:0 8px 8px 0}
         ul{margin:8px 0;padding-left:20px}
       </style></head><body><div class="container">
-        <div class="header"><h1>🎉 Course Enrollment Confirmed!</h1><p>IIT Bombay Flourishing Hub</p></div>
+        <div class="header"><h1>Course Enrollment Confirmed</h1><p>IIT Bombay Flourishing Hub</p></div>
         <div class="content">
           <h2>Hello ${name},</h2>
           <p>You have been successfully enrolled in the following course bundle:</p>
           <div class="box">
-            <p><strong>📚 Course:</strong> ${courseTitle}${courseCode ? ` (${courseCode})` : ''}</p>
-            <p><strong>📋 Enrolled Workshops:</strong></p>
+            <p><strong>Course:</strong> ${courseTitle}${courseCode ? ` (${courseCode})` : ''}</p>
+            <p><strong>Enrolled Workshops:</strong></p>
             <ul>${workshopList}</ul>
           </div>
           <p>You are now registered for all ${workshopTitles.length} workshops above. Details will appear on your dashboard.</p>
@@ -660,14 +660,14 @@ export const sendStaffAssignmentEmail = async (email, name, role, eventTitle, ev
         .content{background:white;padding:30px;border-radius:0 0 10px 10px}
         .box{background:#f0f7ff;border-left:4px solid #667eea;padding:15px;margin:20px 0;border-radius:0 8px 8px 0}
       </style></head><body><div class="container">
-        <div class="header"><h1>📋 New Assignment</h1><p>IIT Bombay Flourishing Hub</p></div>
+        <div class="header"><h1>New Assignment</h1><p>IIT Bombay Flourishing Hub</p></div>
         <div class="content">
           <h2>Hello ${name},</h2>
           <p>You have been assigned as <strong>${roleLabel}</strong> for the following workshop:</p>
           <div class="box">
-            <p><strong>📚 Workshop:</strong> ${eventTitle}</p>
-            <p><strong>📅 Date & Time:</strong> ${formattedDate} IST</p>
-            <p><strong>📍 Venue:</strong> ${eventVenue || 'TBD'}</p>
+            <p><strong>Workshop:</strong> ${eventTitle}</p>
+            <p><strong>Date & Time:</strong> ${formattedDate} IST</p>
+            <p><strong>Venue:</strong> ${eventVenue || 'TBD'}</p>
           </div>
           <p>Details are available on your Flourishing Hub dashboard.</p>
           <p>Best regards,<br>Flourishing Hub Team<br>IIT Bombay</p>
@@ -716,7 +716,7 @@ export const sendPasswordResetEmail = async (email, name, resetLink) => {
         <body>
           <div class="container">
             <div class="header">
-              <h1>🔑 Password Reset</h1>
+              <h1>Password Reset</h1>
               <p>IIT Bombay</p>
               <p class="tagline">Let's Thrive, Not Just Survive</p>
             </div>
@@ -727,7 +727,7 @@ export const sendPasswordResetEmail = async (email, name, resetLink) => {
                 <a href="${resetLink}" class="button">Reset My Password</a>
               </div>
               <div class="warning">
-                <strong>⏰ This link expires in 15 minutes.</strong><br>
+                <strong>This link expires in 15 minutes.</strong><br>
                 If you did not request a password reset, please ignore this email — your account is safe.
               </div>
               <p>If the button doesn't work, copy and paste this link into your browser:</p>
@@ -782,16 +782,16 @@ export const sendPendingApprovalEmail = async (email, name) => {
         <body>
           <div class="container">
             <div class="header">
-              <h1>⏳ Registration Received</h1>
+              <h1>Registration Received</h1>
               <p>IIT Bombay</p>
               <p class="tagline">Let's Thrive, Not Just Survive</p>
             </div>
             <div class="content">
               <h2>Hello ${name},</h2>
               <p>Thank you for registering with Flourishing Hub!</p>
-              
+
               <div class="info-box">
-                <p><strong>📋 Your registration is currently under review by our admin team.</strong></p>
+                <p><strong>Your registration is currently under review by our admin team.</strong></p>
               </div>
               
               <p>Here's what happens next:</p>
