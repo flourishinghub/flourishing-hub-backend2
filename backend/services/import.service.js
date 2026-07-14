@@ -718,6 +718,11 @@ const importEvents = async (rows, meta, createdById) => {
     });
   }
 
+  // Fetched once, outside the per-row loop, for the fallback branch below —
+  // used to validate a CSV row's own "workshop name" against this course's
+  // actual modules instead of silently creating an orphan event/module.
+  const courseModulesForMatching = await fetchCourseModulesForMatching(meta.courseId);
+
   return isScheduleStyleEventSheet(rows)
     ? executeImportRows(buildGroupedScheduleEvents(rows, meta), async (payload) => {
         if (!payload.title || !payload.description || !payload.type || !payload.startAt || !payload.endAt) {
@@ -763,6 +768,24 @@ const importEvents = async (rows, meta, createdById) => {
 
     if (!payload || !payload.title || !payload.description || !payload.type || !payload.startAt || !payload.endAt) {
       throw new ApiError(StatusCodes.BAD_REQUEST, "Event row is missing required fields");
+    }
+
+    // Reject a workshop name that doesn't match any of this course's modules
+    // instead of silently creating an orphan event with no courseModuleId —
+    // that event previously miscounted as a phantom extra "module" in
+    // student bundle-progress and admin course views.
+    if (meta.courseId && courseModulesForMatching.length > 0 && !payload.courseModuleId) {
+      const match = courseModulesForMatching.find(
+        (m) => normalizeKey(m.title) === normalizeKey(payload.title)
+      );
+      if (!match) {
+        const validNames = courseModulesForMatching.map((m) => m.title).join(", ");
+        throw new ApiError(
+          StatusCodes.BAD_REQUEST,
+          `Workshop name "${payload.title}" does not match any module in this course. Valid modules: ${validNames}.`
+        );
+      }
+      payload.courseModuleId = match.id;
     }
 
     payload.instructorId = await resolveStaffId(payload.instructor, "INSTRUCTOR");
@@ -980,6 +1003,40 @@ const annotateStaffMatches = async (events) => {
   }));
 };
 
+// When a course (but not one specific module) is selected for bulk import,
+// each row's own "workshop name" column becomes the event title — with
+// nothing to check it against, a typo/mismatched name used to silently
+// create an orphan event with no courseModuleId link, which then
+// miscounted as an extra "module" in student bundle-progress and course
+// views. Matches each event's title against the course's actual module
+// titles (case/whitespace insensitive); a match also fills in
+// courseModuleId so the event links back to its real module correctly.
+const fetchCourseModulesForMatching = async (courseId) => {
+  if (!courseId) return [];
+  return prisma.courseModule.findMany({
+    where: { courseId },
+    select: { id: true, title: true }
+  });
+};
+
+const matchEventToModule = (event, courseModules) => {
+  if (event.courseModuleId || courseModules.length === 0) {
+    return { ...event, moduleMatched: event.courseModuleId ? true : null };
+  }
+  const match = courseModules.find((m) => normalizeKey(m.title) === normalizeKey(event.title));
+  return {
+    ...event,
+    moduleMatched: !!match,
+    courseModuleId: match ? match.id : event.courseModuleId,
+  };
+};
+
+const annotateModuleMatches = async (events, courseId) => {
+  const courseModules = await fetchCourseModulesForMatching(courseId);
+  if (courseModules.length === 0) return events;
+  return events.map((e) => matchEventToModule(e, courseModules));
+};
+
 export const previewImportEvents = async ({ fileBuffer, fileName, courseId, courseModuleId, batchCode, capacity, workshopType }) => {
   if (!fileBuffer) throw new ApiError(StatusCodes.BAD_REQUEST, "File is required");
   const rows = await parseWorkbookRows(fileBuffer, { fileName });
@@ -1004,6 +1061,7 @@ export const previewImportEvents = async ({ fileBuffer, fileName, courseId, cour
     events = rows.map(row => mapScheduleRowWithModule(row, mod, metaForPreview)).filter(Boolean);
   } else {
     events = rows.map(row => mapScheduleRowToEventPayload(row, metaForPreview)).filter(Boolean);
+    if (courseId) events = await annotateModuleMatches(events, courseId);
   }
 
   return annotateStaffMatches(events);
