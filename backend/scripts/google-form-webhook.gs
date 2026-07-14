@@ -26,27 +26,21 @@
 const BACKEND_URL = 'https://flourishing-hub-backend2-xif0.onrender.com/api/v1';
 const WEBHOOK_SECRET = 'fh-quiz-secret-2026-iitbfh';
 
-// ─── Fill in EXACTLY ONE of these two setups — whichever matches this
-// workshop. Leave the other one's fields blank ('').
+// ─── Nothing below needs editing for a normal copy. The script identifies
+// which workshop it belongs to using THIS FORM'S OWN "Send" link — the
+// backend matches it against whichever Event(s) have that exact link
+// pasted into their Quiz Link field in the admin panel, narrowed to the
+// one the submitting student is actually registered for. That covers both
+// a single standalone workshop AND a compulsory course bundled across
+// multiple batches (same form, several Events sharing the same Quiz Link)
+// with zero per-copy configuration — just paste the Send link into the
+// right event(s)' Quiz Link field and you're done.
 //
-// SETUP 1 — single or optional workshop (just one Event, not scheduled
-// per-batch). Use EVENT_ID.
-//
-// SETUP 2 — compulsory course bundle bulk-imported across MULTIPLE
-// batches (e.g. "Module 1" run 4 times, once per batch — 4 separate
-// Events, same title). Use COMPULSORY_COURSE_ID + WORKSHOP_TITLE instead
-// — ONE Google Form then works for every batch: the backend figures out
-// which specific batch-Event a submission belongs to from which one the
-// submitting student is actually registered for. You do NOT need a
-// separate form per batch.
+// EVENT_ID below is only a manual override for the rare case the
+// auto-match doesn't apply (e.g. testing before the Quiz Link is saved
+// anywhere yet). Leave it blank unless you specifically need it.
 // ───
-
-// SETUP 1
-const EVENT_ID = ''; // from admin panel: Events → click the workshop → .../admin/events/<EVENT_ID>
-
-// SETUP 2
-const COMPULSORY_COURSE_ID = ''; // from admin panel: Courses → click the course → .../admin (check the course's id in its edit/API response, or ask an admin who set it up)
-const WORKSHOP_TITLE = ''; // must exactly match the Event title used across all of that course's batches, e.g. "Module 1"
+const EVENT_ID = ''; // manual override only — from admin panel: Events → click the workshop → .../admin/events/<EVENT_ID>
 
 // Question title must CONTAIN one of these (case-insensitive) to be
 // recognised as the student's email — edit if your form uses different wording.
@@ -81,23 +75,17 @@ function installFormSubmitTrigger() {
   Logger.log('Trigger installed on form: ' + form.getTitle());
 }
 
-// Returns { eventId } for Setup 1, or { courseId, eventTitle } for Setup 2,
-// or null if neither is configured.
+// { eventId } if the manual override is set, otherwise { formId } — this
+// form's own Send link, which the backend matches against whichever
+// Event's Quiz Link field contains it. No per-copy editing required.
 function getWorkshopIdentifier() {
   if (EVENT_ID) return { eventId: EVENT_ID };
-  if (COMPULSORY_COURSE_ID && WORKSHOP_TITLE) return { courseId: COMPULSORY_COURSE_ID, eventTitle: WORKSHOP_TITLE };
-  return null;
+  return { formId: FormApp.getActiveForm().getPublishedUrl() };
 }
 
 function onFormSubmitHandler(e) {
   try {
     const identifier = getWorkshopIdentifier();
-    if (!identifier) {
-      Logger.log('Neither EVENT_ID nor COMPULSORY_COURSE_ID+WORKSHOP_TITLE is set — this form was probably ' +
-        'just copied from the master template. Open Extensions/Script editor, fill in ONE of the two setups ' +
-        'at the top of the script, then run installFormSubmitTrigger once more.');
-      return;
-    }
 
     const formResponse = e.response;
     const itemResponses = formResponse.getItemResponses();

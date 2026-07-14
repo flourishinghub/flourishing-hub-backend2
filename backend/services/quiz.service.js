@@ -9,17 +9,45 @@ import { createNotification } from "./notification.service.js";
 // Event id. A single Google Form shared across all those batches (the
 // realistic setup — same quiz content, different batch/time) can't know
 // which specific batch-Event a given submission belongs to ahead of time.
-// Resolves it here instead: given the course + this workshop's title, find
-// the one Event under that course the SUBMITTING STUDENT is actually
-// registered for — since a student only ever belongs to one batch, this is
-// unambiguous without the Apps Script needing per-batch configuration.
-// Falls back to plain eventId for standalone/optional single-event
-// workshops (no course, or a course with only one batch), where a fixed
-// eventId is simpler and unambiguous.
-const resolveEventId = async ({ eventId, courseId, eventTitle, userId }) => {
+//
+// Preferred resolution: formId (the Form's own getPublishedUrl(), sent
+// unmodified by every copy of the Apps Script template — no per-workshop
+// script editing needed). Matched against whichever Event(s) have that
+// exact link pasted into their Quiz Link field in the admin panel, narrowed
+// to the one the SUBMITTING STUDENT is actually registered for — since a
+// student only ever belongs to one batch, this is unambiguous.
+//
+// Legacy fallback: courseId + eventTitle (same narrowing logic, just keyed
+// by admin-entered IDs instead of the form's own link) for any workshop
+// whose script was configured before formId-based resolution existed.
+// Falls back further to plain eventId for standalone/optional single-event
+// workshops, where a fixed eventId is simpler and unambiguous.
+const resolveEventId = async ({ eventId, courseId, eventTitle, formId, userId }) => {
   if (eventId) return eventId;
+
+  if (formId) {
+    const event = await prisma.event.findFirst({
+      where: {
+        quizLink: { contains: formId },
+        registrations: { some: { userId } }
+      },
+      select: { id: true }
+    });
+    if (event) return event.id;
+    if (!courseId) {
+      throw new ApiError(
+        StatusCodes.NOT_FOUND,
+        "No workshop found whose Quiz Link matches this form, that you're registered for — " +
+          "check that this form's Send link (the long docs.google.com/forms/.../viewform URL, " +
+          "not a shortened forms.gle link) was pasted into the right event's Quiz Link field."
+      );
+    }
+    // formId didn't match anything, but courseId/eventTitle were also
+    // provided (legacy script) — fall through and try that path instead.
+  }
+
   if (!courseId) {
-    throw new ApiError(StatusCodes.BAD_REQUEST, "Either eventId or courseId is required");
+    throw new ApiError(StatusCodes.BAD_REQUEST, "Either eventId, formId, or courseId is required");
   }
 
   const event = await prisma.event.findFirst({
@@ -42,7 +70,7 @@ const resolveEventId = async ({ eventId, courseId, eventTitle, userId }) => {
   return event.id;
 };
 
-export const submitQuizResult = async ({ email, eventId, courseId, eventTitle, score, secret }) => {
+export const submitQuizResult = async ({ email, eventId, courseId, eventTitle, formId, score, secret }) => {
   // Validate webhook secret
   const expectedSecret = process.env.QUIZ_WEBHOOK_SECRET;
   if (!expectedSecret || secret !== expectedSecret) {
@@ -58,7 +86,7 @@ export const submitQuizResult = async ({ email, eventId, courseId, eventTitle, s
   if (!user) throw new ApiError(StatusCodes.NOT_FOUND, `No user found with email: ${email}`);
   if (!user.studentProfile) throw new ApiError(StatusCodes.NOT_FOUND, "Student profile not found");
 
-  const resolvedEventId = await resolveEventId({ eventId, courseId, eventTitle, userId: user.id });
+  const resolvedEventId = await resolveEventId({ eventId, courseId, eventTitle, formId, userId: user.id });
 
   // Fetch event with course to determine pass threshold
   const event = await prisma.event.findUnique({
@@ -162,7 +190,7 @@ export const submitQuizResult = async ({ email, eventId, courseId, eventTitle, s
 // Webhook counterpart of the in-app star-rating flow (services/operation.service.js:submitFeedback),
 // but driven by a Google Form response instead of the student UI. Used for both compulsory workshops
 // (rating alongside the quiz score above) and optional workshops (rating only, no quiz/pass threshold).
-export const submitFormFeedback = async ({ email, eventId, courseId, eventTitle, eventRating, instructorRating, eventComment, instructorComment, secret }) => {
+export const submitFormFeedback = async ({ email, eventId, courseId, eventTitle, formId, eventRating, instructorRating, eventComment, instructorComment, secret }) => {
   const expectedSecret = process.env.QUIZ_WEBHOOK_SECRET;
   if (!expectedSecret || secret !== expectedSecret) {
     throw new ApiError(StatusCodes.UNAUTHORIZED, "Invalid webhook secret");
@@ -171,7 +199,7 @@ export const submitFormFeedback = async ({ email, eventId, courseId, eventTitle,
   const user = await prisma.user.findUnique({ where: { email: email.trim().toLowerCase() } });
   if (!user) throw new ApiError(StatusCodes.NOT_FOUND, `No user found with email: ${email}`);
 
-  const resolvedEventId = await resolveEventId({ eventId, courseId, eventTitle, userId: user.id });
+  const resolvedEventId = await resolveEventId({ eventId, courseId, eventTitle, formId, userId: user.id });
 
   const registration = await prisma.eventRegistration.findUnique({
     where: { eventId_userId: { eventId: resolvedEventId, userId: user.id } }
