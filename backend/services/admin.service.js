@@ -1045,17 +1045,48 @@ export const deleteEventsByCourse = async (courseId) => {
   return { deletedCount: result.count };
 };
 
-// DANGER ZONE: wipe every Event and every Course (with all their cascading
-// registrations, attendance, check-ins, quiz/module progress, and feedback).
-// Deliberately does NOT touch User accounts — students/staff logins survive.
-// Callers (the controller) are responsible for the typed-confirmation gate;
-// this function performs the deletion unconditionally once called.
-export const wipeAllEventsAndCourses = async () => {
-  const [eventsResult, coursesResult] = await prisma.$transaction([
-    prisma.event.deleteMany({}),
-    prisma.course.deleteMany({}),
-  ]);
-  return { deletedEvents: eventsResult.count, deletedCourses: coursesResult.count };
+// DANGER ZONE: wipe Events and/or Courses (selective — admin picks the
+// scope), with all their cascading registrations, attendance, check-ins,
+// quiz/module progress, and feedback. Deliberately does NOT touch User
+// accounts — students/staff logins survive. Callers (the controller) are
+// responsible for the typed-confirmation gate; this function performs the
+// deletion unconditionally once called.
+export const wipeEventsAndCourses = async ({ deleteEvents, deleteCourses }) => {
+  const ops = [];
+  if (deleteEvents) ops.push(prisma.event.deleteMany({}));
+  if (deleteCourses) ops.push(prisma.course.deleteMany({}));
+  if (ops.length === 0) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, "Select at least one of deleteEvents or deleteCourses");
+  }
+
+  const results = await prisma.$transaction(ops);
+  let i = 0;
+  const deletedEvents = deleteEvents ? results[i++].count : 0;
+  const deletedCourses = deleteCourses ? results[i++].count : 0;
+  return { deletedEvents, deletedCourses };
+};
+
+// DANGER ZONE (non-destructive alternative): archive Events and/or Courses
+// instead of deleting them — flips status to ARCHIVED, all data stays
+// intact and can be restored by changing status back. Skips rows already
+// ARCHIVED so re-running is harmless.
+export const archiveEventsAndCourses = async ({ archiveEvents, archiveCourses }) => {
+  const ops = [];
+  if (archiveEvents) {
+    ops.push(prisma.event.updateMany({ where: { status: { not: 'ARCHIVED' } }, data: { status: 'ARCHIVED' } }));
+  }
+  if (archiveCourses) {
+    ops.push(prisma.course.updateMany({ where: { status: { not: 'ARCHIVED' } }, data: { status: 'ARCHIVED' } }));
+  }
+  if (ops.length === 0) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, "Select at least one of archiveEvents or archiveCourses");
+  }
+
+  const results = await prisma.$transaction(ops);
+  let i = 0;
+  const archivedEvents = archiveEvents ? results[i++].count : 0;
+  const archivedCourses = archiveCourses ? results[i++].count : 0;
+  return { archivedEvents, archivedCourses };
 };
 
 // REMOVE STAFF ASSIGNMENT

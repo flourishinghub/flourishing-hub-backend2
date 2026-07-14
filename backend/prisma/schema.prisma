@@ -51,6 +51,7 @@ enum EventStatus {
   PUBLISHED
   COMPLETED
   CANCELLED
+  ARCHIVED
 }
 
 enum RegistrationStatus {

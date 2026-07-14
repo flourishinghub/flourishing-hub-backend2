@@ -12,7 +12,8 @@ import {
   deleteEvent,
   bulkDeleteEvents,
   deleteEventsByCourse,
-  wipeAllEventsAndCourses,
+  wipeEventsAndCourses,
+  archiveEventsAndCourses,
   removeStaffAssignment,
   getVolunteersWithActivity,
   getEventDetailsForAdmin,
@@ -251,25 +252,43 @@ export const deleteEventsByCourseController = asyncHandler(async (req, res) => {
   });
 });
 
-// DANGER ZONE: WIPE EVERY EVENT AND COURSE (not Users). Requires the
-// caller to send the exact confirmation phrase — this is the server-side
-// half of the safety gate; the admin UI's typed-confirmation box is the
-// other half.
-export const wipeAllEventsAndCoursesController = asyncHandler(async (req, res) => {
+// DANGER ZONE: WIPE Events and/or Courses (admin picks the scope, not
+// Users). Requires the caller to send the exact confirmation phrase — this
+// is the server-side half of the safety gate; the admin UI's typed-
+// confirmation box is the other half.
+export const wipeEventsAndCoursesController = asyncHandler(async (req, res) => {
   if (req.user.role !== 'ADMIN') {
     throw new ApiError(StatusCodes.FORBIDDEN, "Admin role required");
   }
 
-  const { confirm } = req.body;
+  const { confirm, deleteEvents, deleteCourses } = req.body;
   if (confirm !== 'DELETE ALL') {
     throw new ApiError(StatusCodes.BAD_REQUEST, 'Send { "confirm": "DELETE ALL" } to proceed — this action is irreversible');
   }
 
-  const result = await wipeAllEventsAndCourses();
+  const result = await wipeEventsAndCourses({ deleteEvents: !!deleteEvents, deleteCourses: !!deleteCourses });
 
   res.status(StatusCodes.OK).json({
     success: true,
     message: `Deleted ${result.deletedEvents} event(s) and ${result.deletedCourses} course(s)`,
+    data: result
+  });
+});
+
+// DANGER ZONE (non-destructive): ARCHIVE Events and/or Courses instead of
+// deleting them — data is preserved, just hidden from active views. Still
+// gated behind a lighter confirmation since it's reversible.
+export const archiveEventsAndCoursesController = asyncHandler(async (req, res) => {
+  if (req.user.role !== 'ADMIN') {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Admin role required");
+  }
+
+  const { archiveEvents, archiveCourses } = req.body;
+  const result = await archiveEventsAndCourses({ archiveEvents: !!archiveEvents, archiveCourses: !!archiveCourses });
+
+  res.status(StatusCodes.OK).json({
+    success: true,
+    message: `Archived ${result.archivedEvents} event(s) and ${result.archivedCourses} course(s)`,
     data: result
   });
 });

@@ -13,7 +13,8 @@ import {
   deleteEventController,
   bulkDeleteEventsController,
   deleteEventsByCourseController,
-  wipeAllEventsAndCoursesController,
+  wipeEventsAndCoursesController,
+  archiveEventsAndCoursesController,
   removeStaffAssignmentController,
   getVolunteersController,
   getEventDetailsForAdminController,
@@ -37,10 +38,13 @@ adminRoutes.put("/events/:eventId", authenticate, modifyEventController);
 // route below, otherwise Express would match "/events/bulk" as eventId="bulk".
 adminRoutes.delete("/events/bulk", authenticate, bulkDeleteEventsController);
 adminRoutes.delete("/events/course/:courseId", authenticate, deleteEventsByCourseController);
-// DANGER ZONE — wipes every Event and every Course (not Users). Requires
-// { confirm: "DELETE ALL" } in the body. Declared standalone since it isn't
-// scoped to a single event/course.
-adminRoutes.delete("/danger-zone/events-and-courses", authenticate, wipeAllEventsAndCoursesController);
+// DANGER ZONE — deletes Events and/or Courses (not Users), scope picked via
+// { deleteEvents, deleteCourses } booleans. Requires { confirm: "DELETE ALL" }
+// in the body. Declared standalone since it isn't scoped to a single event/course.
+adminRoutes.delete("/danger-zone/events-and-courses", authenticate, wipeEventsAndCoursesController);
+// DANGER ZONE (reversible) — archives Events and/or Courses instead of
+// deleting them, scope picked via { archiveEvents, archiveCourses } booleans.
+adminRoutes.post("/danger-zone/archive-events-and-courses", authenticate, archiveEventsAndCoursesController);
 adminRoutes.delete("/events/:eventId", authenticate, deleteEventController);
 adminRoutes.get("/events", authenticate, getAllEventsController);
 adminRoutes.get("/events-with-registrations", authenticate, getAllEventsWithRegistrationsController);
