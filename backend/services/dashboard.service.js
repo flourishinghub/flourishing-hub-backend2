@@ -773,15 +773,22 @@ export const getStudentBundleProgress = async (userId) => {
       const attended = myWorkshops.filter((e) => attendedIds.has(e.id)).length;
 
       // Compulsory bundle courses: template modules with no scheduled event
-      // yet (for this student's batch, or at all) are still part of their
-      // bundle — surfaced as pending so totalWorkshops reflects the whole
-      // bundle, not just whatever has been scheduled so far.
+      // yet for THIS student are still part of their bundle — surfaced as
+      // pending so totalWorkshops reflects the whole bundle, not just
+      // whatever has been scheduled so far.
+      //
+      // "Already scheduled" is checked directly against myWorkshops (the
+      // events this student is actually registered for) rather than a
+      // separately batch-filtered slice of course.events — the previous
+      // version re-derived the student's batch from myWorkshops and then
+      // re-filtered course.events by it, and if that inference didn't line
+      // up with a bulk-imported event's own batch/title exactly, an already-
+      // scheduled module could still fail both the courseModuleId and title
+      // match, appear in pendingWorkshops too, and double-count in `total`.
       let pendingWorkshops = [];
       if (course.isCompulsory) {
-        const studentBatch = myWorkshops.find((w) => w.batch)?.batch ?? null;
-        const relevantEvents = course.events.filter((e) => e.batch === studentBatch || !e.batch);
         const scheduledModuleIds = new Set(
-          relevantEvents.filter((e) => e.courseModuleId).map((e) => e.courseModuleId)
+          myWorkshops.filter((e) => e.courseModuleId).map((e) => e.courseModuleId)
         );
         // Events created outside the module-based flow (e.g. a plain bulk
         // schedule import) never get a courseModuleId, so a module can only
@@ -790,7 +797,7 @@ export const getStudentBundleProgress = async (userId) => {
         // title, otherwise a module whose event skipped that link shows up
         // as a duplicate "Pending Schedule" entry alongside the real one.
         const scheduledTitles = new Set(
-          relevantEvents.map((e) => (e.title || "").trim().toLowerCase()).filter(Boolean)
+          myWorkshops.map((e) => (e.title || "").trim().toLowerCase()).filter(Boolean)
         );
         pendingWorkshops = course.modules
           .filter((m) => !scheduledModuleIds.has(m.id) && !scheduledTitles.has((m.title || "").trim().toLowerCase()))
