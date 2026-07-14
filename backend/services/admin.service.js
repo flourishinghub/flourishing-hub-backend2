@@ -1045,6 +1045,19 @@ export const deleteEventsByCourse = async (courseId) => {
   return { deletedCount: result.count };
 };
 
+// DANGER ZONE: wipe every Event and every Course (with all their cascading
+// registrations, attendance, check-ins, quiz/module progress, and feedback).
+// Deliberately does NOT touch User accounts — students/staff logins survive.
+// Callers (the controller) are responsible for the typed-confirmation gate;
+// this function performs the deletion unconditionally once called.
+export const wipeAllEventsAndCourses = async () => {
+  const [eventsResult, coursesResult] = await prisma.$transaction([
+    prisma.event.deleteMany({}),
+    prisma.course.deleteMany({}),
+  ]);
+  return { deletedEvents: eventsResult.count, deletedCourses: coursesResult.count };
+};
+
 // REMOVE STAFF ASSIGNMENT
 export const removeStaffAssignment = async (assignmentId) => {
   const assignment = await prisma.eventStaffAssignment.delete({

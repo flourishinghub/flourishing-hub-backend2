@@ -12,6 +12,7 @@ import {
   deleteEvent,
   bulkDeleteEvents,
   deleteEventsByCourse,
+  wipeAllEventsAndCourses,
   removeStaffAssignment,
   getVolunteersWithActivity,
   getEventDetailsForAdmin,
@@ -246,6 +247,29 @@ export const deleteEventsByCourseController = asyncHandler(async (req, res) => {
   res.status(StatusCodes.OK).json({
     success: true,
     message: `${result.deletedCount} event(s) deleted successfully`,
+    data: result
+  });
+});
+
+// DANGER ZONE: WIPE EVERY EVENT AND COURSE (not Users). Requires the
+// caller to send the exact confirmation phrase — this is the server-side
+// half of the safety gate; the admin UI's typed-confirmation box is the
+// other half.
+export const wipeAllEventsAndCoursesController = asyncHandler(async (req, res) => {
+  if (req.user.role !== 'ADMIN') {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Admin role required");
+  }
+
+  const { confirm } = req.body;
+  if (confirm !== 'DELETE ALL') {
+    throw new ApiError(StatusCodes.BAD_REQUEST, 'Send { "confirm": "DELETE ALL" } to proceed — this action is irreversible');
+  }
+
+  const result = await wipeAllEventsAndCourses();
+
+  res.status(StatusCodes.OK).json({
+    success: true,
+    message: `Deleted ${result.deletedEvents} event(s) and ${result.deletedCourses} course(s)`,
     data: result
   });
 });

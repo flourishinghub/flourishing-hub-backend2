@@ -13,6 +13,7 @@ import {
   deleteEventController,
   bulkDeleteEventsController,
   deleteEventsByCourseController,
+  wipeAllEventsAndCoursesController,
   removeStaffAssignmentController,
   getVolunteersController,
   getEventDetailsForAdminController,
@@ -36,6 +37,10 @@ adminRoutes.put("/events/:eventId", authenticate, modifyEventController);
 // route below, otherwise Express would match "/events/bulk" as eventId="bulk".
 adminRoutes.delete("/events/bulk", authenticate, bulkDeleteEventsController);
 adminRoutes.delete("/events/course/:courseId", authenticate, deleteEventsByCourseController);
+// DANGER ZONE — wipes every Event and every Course (not Users). Requires
+// { confirm: "DELETE ALL" } in the body. Declared standalone since it isn't
+// scoped to a single event/course.
+adminRoutes.delete("/danger-zone/events-and-courses", authenticate, wipeAllEventsAndCoursesController);
 adminRoutes.delete("/events/:eventId", authenticate, deleteEventController);
 adminRoutes.get("/events", authenticate, getAllEventsController);
 adminRoutes.get("/events-with-registrations", authenticate, getAllEventsWithRegistrationsController);
