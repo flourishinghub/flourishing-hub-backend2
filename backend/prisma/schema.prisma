@@ -233,6 +233,8 @@ model Event {
   courseModuleId        String?
   batch                 String?
   completionEmailSentAt DateTime?
+  reminder24hSentAt     DateTime?
+  reminder1hSentAt      DateTime?
   createdAt             DateTime               @default(now())
   updatedAt             DateTime               @updatedAt
   createdBy             User                   @relation("EventCreatedBy", fields: [createdById], references: [id])
@@ -492,32 +494,42 @@ model CourseModule {
 
   course          Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
   events          Event[]   @relation("EventFromModule")
+  batchAssignments BatchAssignment[]
 
   @@index([courseId, order])
   @@index([isActive])
 }
 
 model BatchAssignment {
-  id            String   @id @default(cuid())
-  email         String?
-  rollNumber    String?
-  batchCode     String
-  name          String?
-  department    String?
-  programme     String?
-  yearOfStudy   Int?
-  section       String?
-  courseId      String?
-  isMatched     Boolean  @default(false)
-  matchedUserId String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id             String   @id @default(cuid())
+  email          String?
+  rollNumber     String?
+  batchCode      String
+  name           String?
+  department     String?
+  programme      String?
+  yearOfStudy    Int?
+  section        String?
+  courseId       String?
+  // Nullable: a course whose students use ONE batch code for the whole
+  // course (existing behaviour) leaves this null. A course where the same
+  // student has a DIFFERENT batch per module (e.g. M1B1 for Module A, M2B3
+  // for Module B) sets this so each module's assignment is its own row
+  // instead of one row per (courseId, student) that the next module's
+  // upload silently overwrites.
+  courseModuleId String?
+  isMatched      Boolean  @default(false)
+  matchedUserId  String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  course        Course?  @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  course         Course?       @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  courseModule   CourseModule? @relation(fields: [courseModuleId], references: [id], onDelete: SetNull)
 
   @@index([email])
   @@index([rollNumber])
   @@index([batchCode])
   @@index([isMatched])
   @@index([courseId])
+  @@index([courseModuleId])
 }

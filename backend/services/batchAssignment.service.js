@@ -36,8 +36,14 @@ const parseAndValidateRows = async (fileBuffer, fileName) => {
     const programme = norm(getCol(row, ['programme', 'program', 'Programme', 'Program', 'PROGRAMME']));
     const yearOfStudy = normInt(getCol(row, ['year', 'year_of_study', 'yearofstudy', 'Year', 'Year of Study']));
     const section = norm(getCol(row, ['section', 'Section', 'SECTION']));
+    // Optional — only needed for a compulsory course where the same student
+    // has a DIFFERENT batch per module (e.g. Module A batch M1B1, Module B
+    // batch M2B3). Left blank, a row behaves exactly as before: one batch
+    // for the whole course. Matched against the course's real modules by
+    // title (case/spacing-insensitive) further down.
+    const moduleTitle = norm(getCol(row, ['module', 'module_name', 'moduleName', 'Module', 'Module Name', 'workshop', 'workshop_name', 'workshopName', 'Workshop Name']));
 
-    return { rowNumber: i + 2, email, rollNumber, batchCode, name, department, programme, yearOfStudy, section };
+    return { rowNumber: i + 2, email, rollNumber, batchCode, name, department, programme, yearOfStudy, section, moduleTitle };
   });
 
   const validRows = [];
@@ -56,10 +62,29 @@ const parseAndValidateRows = async (fileBuffer, fileName) => {
   return { totalRows: rows.length, validRows, errors };
 };
 
-// Rows whose email/roll_no already has a BatchAssignment for this SAME course —
-// i.e. this student was already uploaded under this course before. Scoped to
-// courseId so the same student appearing in two different courses is normal,
-// not a duplicate.
+// Resolves each row's optional moduleTitle to a real CourseModule.id, so a
+// student can have one BatchAssignment row per module (different batch per
+// module) instead of a single row per course. Rows with no moduleTitle (the
+// existing one-batch-for-the-whole-course case) get courseModuleId: null,
+// unchanged from before.
+const resolveModuleIds = async (validRows, courseId) => {
+  if (!validRows.some((r) => r.moduleTitle)) {
+    return validRows.map((r) => ({ ...r, courseModuleId: null }));
+  }
+  const modules = await prisma.courseModule.findMany({ where: { courseId }, select: { id: true, title: true } });
+  const moduleByTitle = new Map(modules.map((m) => [normalizeKey(m.title), m.id]));
+  return validRows.map((r) => ({
+    ...r,
+    courseModuleId: r.moduleTitle ? moduleByTitle.get(normalizeKey(r.moduleTitle)) ?? null : null
+  }));
+};
+
+// Rows whose email/roll_no already has a BatchAssignment for this SAME
+// course AND module — i.e. this student was already uploaded for this exact
+// module before. Scoped to (courseId, courseModuleId) so the same student
+// appearing again for a DIFFERENT module of the same course (their batch
+// for Module B, having already been uploaded for Module A) is normal, not a
+// duplicate — and courseId alone still separates two unrelated courses.
 const findDuplicateRows = async (validRows, courseId) => {
   const emails = [...new Set(validRows.map((r) => r.email).filter(Boolean))];
   const rollNumbers = [...new Set(validRows.map((r) => r.rollNumber).filter(Boolean))];
@@ -74,12 +99,14 @@ const findDuplicateRows = async (validRows, courseId) => {
     }
   });
 
-  const existingByEmail = new Set(existingAssignments.filter((a) => a.email).map((a) => a.email));
-  const existingByRollNumber = new Set(existingAssignments.filter((a) => a.rollNumber).map((a) => a.rollNumber.toUpperCase()));
-
-  return validRows.filter(
-    (r) => (r.email && existingByEmail.has(r.email)) || (r.rollNumber && existingByRollNumber.has(r.rollNumber))
+  const key = (email, rollNumber, courseModuleId) => `${courseModuleId || ''}::${email || rollNumber?.toUpperCase() || ''}`;
+  const existingKeys = new Set(
+    existingAssignments
+      .filter((a) => a.email || a.rollNumber)
+      .map((a) => key(a.email, a.rollNumber, a.courseModuleId))
   );
+
+  return validRows.filter((r) => existingKeys.has(key(r.email, r.rollNumber, r.courseModuleId)));
 };
 
 // Registers one student into every COMPULSORY workshop of this exact
@@ -185,12 +212,13 @@ export const uploadBatchAssignment = async ({ fileBuffer, fileName, courseId, re
   const course = await prisma.course.findUnique({ where: { id: courseId }, select: { id: true, name: true } });
   if (!course) throw new ApiError(StatusCodes.NOT_FOUND, "Course not found");
 
-  const { totalRows, validRows, errors } = await parseAndValidateRows(fileBuffer, fileName);
+  const { totalRows, validRows: parsedRows, errors } = await parseAndValidateRows(fileBuffer, fileName);
 
-  if (validRows.length === 0) {
+  if (parsedRows.length === 0) {
     return { total: totalRows, matched: 0, stored: 0, skipped: errors.length, errors };
   }
 
+  const validRows = await resolveModuleIds(parsedRows, courseId);
   const duplicateRows = await findDuplicateRows(validRows, courseId);
 
   if (!resolutionMode && duplicateRows.length > 0) {
@@ -251,15 +279,32 @@ export const uploadBatchAssignment = async ({ fileBuffer, fileName, courseId, re
   const userByRollNumber = new Map(
     existingUsers.filter((u) => u.studentProfile?.rollNumber).map((u) => [u.studentProfile.rollNumber.toUpperCase(), u])
   );
-  const assignmentByEmail = new Map(existingAssignments.filter((a) => a.email).map((a) => [a.email, a]));
-  const assignmentByRollNumber = new Map(existingAssignments.filter((a) => a.rollNumber).map((a) => [a.rollNumber.toUpperCase(), a]));
+  // Keyed by (courseModuleId + email/roll) instead of just email/roll, so a
+  // student who already has a row for Module A's batch and is now being
+  // uploaded for Module B's batch gets a SECOND row (create) instead of the
+  // Module A row being overwritten (update) — which is what was happening
+  // before courseModuleId existed at all.
+  const assignmentKey = (courseModuleId, email, rollNumber) => `${courseModuleId || ''}::${email || rollNumber || ''}`;
+  const assignmentByKey = new Map(
+    existingAssignments
+      .filter((a) => a.email || a.rollNumber)
+      .flatMap((a) => {
+        const entries = [];
+        if (a.email) entries.push([assignmentKey(a.courseModuleId, a.email, null), a]);
+        if (a.rollNumber) entries.push([assignmentKey(a.courseModuleId, null, a.rollNumber.toUpperCase()), a]);
+        return entries;
+      })
+  );
 
   for (const row of rowsToProcess) {
-    const { rowNumber, email, rollNumber, batchCode, name, department, programme, yearOfStudy, section } = row;
+    const { rowNumber, email, rollNumber, batchCode, name, department, programme, yearOfStudy, section, courseModuleId } = row;
 
     try {
       const existingUser = (email && userByEmail.get(email)) || (rollNumber && userByRollNumber.get(rollNumber)) || null;
-      const existingAssignment = (email && assignmentByEmail.get(email)) || (rollNumber && assignmentByRollNumber.get(rollNumber)) || null;
+      const existingAssignment =
+        (email && assignmentByKey.get(assignmentKey(courseModuleId, email, null))) ||
+        (rollNumber && assignmentByKey.get(assignmentKey(courseModuleId, null, rollNumber))) ||
+        null;
 
       let savedAssignment;
 
@@ -279,10 +324,10 @@ export const uploadBatchAssignment = async ({ fileBuffer, fileName, courseId, re
           existingAssignment
             ? prisma.batchAssignment.update({
                 where: { id: existingAssignment.id },
-                data: { email, rollNumber, batchCode, name, department, programme, yearOfStudy, section, courseId, isMatched: true, matchedUserId: existingUser.id }
+                data: { email, rollNumber, batchCode, name, department, programme, yearOfStudy, section, courseId, courseModuleId, isMatched: true, matchedUserId: existingUser.id }
               })
             : prisma.batchAssignment.create({
-                data: { email, rollNumber, batchCode, name, department, programme, yearOfStudy, section, courseId, isMatched: true, matchedUserId: existingUser.id }
+                data: { email, rollNumber, batchCode, name, department, programme, yearOfStudy, section, courseId, courseModuleId, isMatched: true, matchedUserId: existingUser.id }
               })
         ]);
         savedAssignment = assignment;
@@ -293,18 +338,18 @@ export const uploadBatchAssignment = async ({ fileBuffer, fileName, courseId, re
         savedAssignment = existingAssignment
           ? await prisma.batchAssignment.update({
               where: { id: existingAssignment.id },
-              data: { email, rollNumber, batchCode, name, department, programme, yearOfStudy, section, courseId, isMatched: false, matchedUserId: null }
+              data: { email, rollNumber, batchCode, name, department, programme, yearOfStudy, section, courseId, courseModuleId, isMatched: false, matchedUserId: null }
             })
           : await prisma.batchAssignment.create({
-              data: { email, rollNumber, batchCode, name, department, programme, yearOfStudy, section, courseId, isMatched: false }
+              data: { email, rollNumber, batchCode, name, department, programme, yearOfStudy, section, courseId, courseModuleId, isMatched: false }
             });
         results.stored++;
       }
 
       // Keep the in-memory lookup fresh so duplicate email/roll_no rows later in the
       // same file update this record instead of racing to create a duplicate.
-      if (email) assignmentByEmail.set(email, savedAssignment);
-      if (rollNumber) assignmentByRollNumber.set(rollNumber, savedAssignment);
+      if (email) assignmentByKey.set(assignmentKey(courseModuleId, email, null), savedAssignment);
+      if (rollNumber) assignmentByKey.set(assignmentKey(courseModuleId, null, rollNumber), savedAssignment);
     } catch (err) {
       results.errors.push({ row: rowNumber, message: err.message });
       results.skipped++;
@@ -392,7 +437,8 @@ export const listBatchAssignments = async ({ batchCode, isMatched, courseId } = 
       ...(courseId ? { courseId } : {}),
     },
     include: {
-      course: { select: { id: true, name: true, code: true } }
+      course: { select: { id: true, name: true, code: true } },
+      courseModule: { select: { id: true, title: true } }
     },
     orderBy: [{ batchCode: 'asc' }, { name: 'asc' }],
   });
@@ -402,9 +448,14 @@ export const downloadBatchTemplate = async () => {
   return createWorkbookBuffer([{
     name: "Batch Assignment",
     rows: [
-      { email: "student@iitb.ac.in", roll_no: "22B1234", batch_code: "d1t1", name: "Rahul Sharma", department: "CSE", programme: "BTECH", year: 2, section: "A" },
-      { email: "student2@gmail.com", roll_no: "22B5678", batch_code: "d1t2", name: "Priya Singh", department: "EE", programme: "BTECH", year: 1, section: "B" },
-      { email: "", roll_no: "22B9999", batch_code: "d1t1", name: "Amit Kumar", department: "ME", programme: "MTECH", year: 1, section: "" }
+      { email: "student@iitb.ac.in", roll_no: "22B1234", batch_code: "d1t1", name: "Rahul Sharma", department: "CSE", programme: "BTECH", year: 2, section: "A", module: "" },
+      { email: "student2@gmail.com", roll_no: "22B5678", batch_code: "d1t2", name: "Priya Singh", department: "EE", programme: "BTECH", year: 1, section: "B", module: "" },
+      { email: "", roll_no: "22B9999", batch_code: "d1t1", name: "Amit Kumar", department: "ME", programme: "MTECH", year: 1, section: "", module: "" },
+      // Same student, different batch per module — leave `module` blank
+      // everywhere else; only fill it in when a course needs per-module
+      // batches like this pair.
+      { email: "student3@iitb.ac.in", roll_no: "22B4321", batch_code: "M1B1", name: "Sana Iyer", department: "CSE", programme: "BTECH", year: 2, section: "A", module: "Module A" },
+      { email: "student3@iitb.ac.in", roll_no: "22B4321", batch_code: "M2B3", name: "Sana Iyer", department: "CSE", programme: "BTECH", year: 2, section: "A", module: "Module B" }
     ]
   }]);
 };
