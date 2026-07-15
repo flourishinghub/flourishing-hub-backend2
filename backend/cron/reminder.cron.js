@@ -19,13 +19,21 @@ const getTodayIstBounds = () => {
   };
 };
 
-const sendRemindersForWindow = async (fromOffset, toOffset, label) => {
+// `sentAtField` ("reminder24hSentAt" / "reminder1hSentAt") is both the query
+// guard and the write-after-send marker. Without it, an event whose startAt
+// sits inside this function's window (2h wide for the 24h reminder, 10min
+// for the 1h reminder) gets re-matched on every hourly tick where it's still
+// inside the window — e.g. the 2h-wide "tomorrow" window re-catches the same
+// event on 2 consecutive hourly ticks, sending 2 duplicate reminders (email
+// + in-app notification) for one event. Mirrors the completionEmailSentAt
+// guard already used by sendSessionCompletedNotices below.
+const sendRemindersForWindow = async (fromOffset, toOffset, label, sentAtField) => {
   const now = new Date();
   const from = new Date(now.getTime() + fromOffset);
   const to   = new Date(now.getTime() + toOffset);
 
   const upcomingEvents = await prisma.event.findMany({
-    where: { status: "PUBLISHED", startAt: { gte: from, lte: to } },
+    where: { status: "PUBLISHED", startAt: { gte: from, lte: to }, [sentAtField]: null },
     include: {
       registrations: {
         include: { user: { select: { id: true, name: true, email: true } } }
@@ -37,6 +45,11 @@ const sendRemindersForWindow = async (fromOffset, toOffset, label) => {
   });
 
   for (const event of upcomingEvents) {
+    // Mark first, before sending — if a send fails/hangs partway through the
+    // user list, the next tick shouldn't re-email/re-notify everyone who
+    // already got this reminder.
+    await prisma.event.update({ where: { id: event.id }, data: { [sentAtField]: now } });
+
     const allUsers = [
       ...event.registrations.map(r => r.user),
       ...event.assignments.map(a => a.user)
@@ -154,17 +167,61 @@ export const sendSessionCompletedNotices = async () => {
   }
 };
 
+// A check-in an instructor never reviewed (still PENDING) used to sit that
+// way forever — no attendance record, no resolution, indistinguishable from
+// "never checked in" once the session was long over. Auto-rejects any
+// check-in still PENDING 24h+ after its event ended, so every session
+// eventually reaches a final state without needing a human to remember it.
+const STALE_CHECKIN_GRACE_MS = 24 * 60 * 60 * 1000;
+
+export const autoRejectStaleCheckIns = async () => {
+  const cutoff = new Date(Date.now() - STALE_CHECKIN_GRACE_MS);
+
+  const staleCheckIns = await prisma.eventCheckIn.findMany({
+    where: {
+      status: "PENDING",
+      event: { endAt: { lt: cutoff } }
+    },
+    select: { id: true, userId: true, event: { select: { id: true, title: true } } }
+  });
+
+  if (!staleCheckIns.length) return;
+
+  await prisma.eventCheckIn.updateMany({
+    where: { id: { in: staleCheckIns.map((c) => c.id) } },
+    data: { status: "REJECTED", note: "Auto-rejected: not reviewed within 24 hours of session end" }
+  });
+
+  for (const checkIn of staleCheckIns) {
+    await createNotificationsForUsers(
+      [checkIn.userId],
+      "warning",
+      "Check-In Not Verified",
+      `Your check-in for "${checkIn.event.title}" wasn't verified by the instructor in time and has been marked absent. Contact your instructor if this is a mistake.`,
+      checkIn.event.id
+    ).catch(() => {});
+  }
+
+  console.log(`[auto-reject-checkins] Resolved ${staleCheckIns.length} stale PENDING check-in(s)`);
+};
+
 // Runs every hour at minute 0, plus a dedicated daily run at 8:00 AM IST
 // (02:30 UTC) for the same-day morning reminder.
 export const startReminderCron = () => {
   cron.schedule("0 * * * *", async () => {
     try {
       // 24-hour reminder (23–25 hours window)
-      await sendRemindersForWindow(23 * 60 * 60 * 1000, 25 * 60 * 60 * 1000, "tomorrow");
+      await sendRemindersForWindow(23 * 60 * 60 * 1000, 25 * 60 * 60 * 1000, "tomorrow", "reminder24hSentAt");
       // 1-hour reminder (55–65 minutes window)
-      await sendRemindersForWindow(55 * 60 * 1000, 65 * 60 * 1000, "in 1 hour");
+      await sendRemindersForWindow(55 * 60 * 1000, 65 * 60 * 1000, "in 1 hour", "reminder1hSentAt");
     } catch (err) {
       console.error("Reminder cron error:", err);
+    }
+
+    try {
+      await autoRejectStaleCheckIns();
+    } catch (err) {
+      console.error("Auto-reject stale check-ins cron error:", err);
     }
   });
 
@@ -191,5 +248,5 @@ export const startReminderCron = () => {
     }
   });
 
-  console.log("Reminder cron job started (runs every hour — 24h & 1h reminders — plus a daily 8:00 AM IST same-day reminder — plus a per-minute session-completed check)");
+  console.log("Reminder cron job started (runs every hour — 24h & 1h reminders + stale check-in auto-reject — plus a daily 8:00 AM IST same-day reminder — plus a per-minute session-completed check)");
 };

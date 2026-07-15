@@ -411,7 +411,7 @@ export const verifyAllCheckIns = async (eventId, actor) => {
 };
 
 export const getMyAttendance = async (userId) => {
-  const [registrations, attendanceRecords, verifiedCheckIns, moduleProgress, feedbacks] = await Promise.all([
+  const [registrations, attendanceRecords, verifiedCheckIns, pendingCheckIns, moduleProgress, feedbacks] = await Promise.all([
     prisma.eventRegistration.findMany({
       where: {
         userId,
@@ -428,6 +428,11 @@ export const getMyAttendance = async (userId) => {
     }),
     prisma.attendanceRecord.findMany({ where: { userId } }),
     prisma.eventCheckIn.findMany({ where: { userId, status: "VERIFIED" } }),
+    // A check-in the instructor never got to (still PENDING once the session
+    // is long over) previously fell through to the same default as "never
+    // checked in at all" — ABSENT — even though the student did show up.
+    // Surfaced as its own PENDING status instead so that gets distinguished.
+    prisma.eventCheckIn.findMany({ where: { userId, status: "PENDING" } }),
     prisma.moduleProgress.findMany({
       where: { studentProfile: { userId } },
       include: { module: { select: { eventId: true, maxMarks: true } } }
@@ -454,12 +459,15 @@ export const getMyAttendance = async (userId) => {
   return registrations.map((reg) => {
     const attendance = attendanceRecords.find((a) => a.eventId === reg.eventId);
     const hasVerifiedCheckIn = verifiedCheckIns.some((c) => c.eventId === reg.eventId);
+    const hasPendingCheckIn = pendingCheckIns.some((c) => c.eventId === reg.eventId);
 
     let status = "ABSENT";
     if (attendance?.status === "PRESENT" || hasVerifiedCheckIn) {
       status = "PRESENT";
     } else if (attendance?.status === "EXCUSED") {
       status = "EXCUSED";
+    } else if (hasPendingCheckIn) {
+      status = "PENDING";
     }
 
     const marks = marksMap[reg.eventId];

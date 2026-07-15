@@ -1352,6 +1352,21 @@ export const getEventDetailsForAdmin = async (eventId) => {
   const quizByStudentProfileId = new Map(moduleProgressRows.map((p) => [p.studentProfileId, p]));
   const feedbackByUserId = new Map(event.feedbackEntries.map((f) => [f.userId, f]));
 
+  // A registrant with a PENDING check-in (showed up, instructor just hasn't
+  // reviewed it yet) previously looked identical to one who never checked in
+  // at all — admin had no way to tell "needs review" apart from "no-show"
+  // without opening the check-in review tab separately. Surfaced here per
+  // registrant instead. Most recent check-in wins if a student somehow has
+  // more than one (e.g. re-checked in for a different module).
+  const checkIns = await prisma.eventCheckIn.findMany({
+    where: { eventId },
+    orderBy: { checkedInAt: "desc" }
+  });
+  const checkInByUserId = new Map();
+  for (const c of checkIns) {
+    if (!checkInByUserId.has(c.userId)) checkInByUserId.set(c.userId, c.status);
+  }
+
   const registrantsWithQuizAndFeedback = event.registrations.map((r) => {
     const quiz = r.user.studentProfile ? quizByStudentProfileId.get(r.user.studentProfile.id) : undefined;
     const feedback = feedbackByUserId.get(r.userId);
@@ -1360,7 +1375,8 @@ export const getEventDetailsForAdmin = async (eventId) => {
       quizScore: quiz?.marksObtained ?? null,
       quizSubmittedAt: quiz?.completedAt ?? null,
       eventRating: feedback?.eventRating ?? null,
-      instructorRating: feedback?.instructorRating ?? null
+      instructorRating: feedback?.instructorRating ?? null,
+      checkInStatus: checkInByUserId.get(r.userId) ?? null
     };
   });
 
