@@ -287,14 +287,35 @@ const mapStudentModule = (moduleItem, event, progress) => {
 };
 
 const buildStudentLikeProfile = async (userId, explicitRole) => {
-  const [user, registrations, progressEntries, attendanceRecords, openEvents] = await Promise.all([
-    prisma.user.findUnique({
-      where: { id: userId },
-      include: {
-        studentProfile: true,
-        instructorProfile: true
-      }
-    }),
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      studentProfile: true,
+      instructorProfile: true
+    }
+  });
+
+  if (!user) {
+    throw new ApiError(StatusCodes.NOT_FOUND, "User not found");
+  }
+
+  // Same batch-scoped COMPULSORY-workshop visibility guard as listEvents()
+  // in event.service.js: without it, a student saw every batch's copy of a
+  // course's workshops here (e.g. all 8 workshops of a 4-module x 2-batch
+  // course) instead of just the ones for their own batch.
+  const studentVisibilityFilter =
+    user.role === "STUDENT"
+      ? {
+          OR: [
+            { batch: null },
+            { courseId: null },
+            { registrationMode: { not: "COMPULSORY" } },
+            { registrations: { some: { userId } } }
+          ]
+        }
+      : {};
+
+  const [registrations, progressEntries, attendanceRecords, openEvents] = await Promise.all([
     prisma.eventRegistration.findMany({
       where: { userId },
       include: {
@@ -354,7 +375,8 @@ const buildStudentLikeProfile = async (userId, explicitRole) => {
         status: "PUBLISHED",
         startAt: {
           gte: new Date()
-        }
+        },
+        ...studentVisibilityFilter
       },
       include: {
         modules: {
@@ -389,10 +411,6 @@ const buildStudentLikeProfile = async (userId, explicitRole) => {
       take: 20
     })
   ]);
-
-  if (!user) {
-    throw new ApiError(StatusCodes.NOT_FOUND, "User not found");
-  }
 
   const progressMap = new Map(
     progressEntries.map((entry) => [entry.moduleId, entry])
@@ -905,10 +923,30 @@ export const getFrontendDashboard = async (user, explicitRole) => {
 };
 
 export const listFrontendEvents = async (user, explicitRole) => {
+  // A batch-scoped COMPULSORY workshop under a course belongs to whichever
+  // batch it was scheduled for — a student should only ever see their own
+  // batch's copy, not every other batch's copy of the same workshop title
+  // (e.g. a 4-module x 2-batch course would otherwise show all 8 workshops
+  // to every student instead of just their 4). listEvents() in
+  // event.service.js already has this exact guard; this endpoint (the one
+  // the actual student-facing app hits for its events list) never did.
+  const studentVisibilityFilter =
+    user.role === "STUDENT"
+      ? {
+          OR: [
+            { batch: null },
+            { courseId: null },
+            { registrationMode: { not: "COMPULSORY" } },
+            { registrations: { some: { userId: user.id } } }
+          ]
+        }
+      : {};
+
   const [events, registrations] = await Promise.all([
     prisma.event.findMany({
       where: {
-        status: "PUBLISHED"
+        status: "PUBLISHED",
+        ...studentVisibilityFilter
       },
       include: {
         modules: {
