@@ -2,6 +2,12 @@ import nodemailer from "nodemailer";
 import { ApiError } from "../utils/ApiError.js";
 import { StatusCodes } from "http-status-codes";
 
+// Temporary Gmail-SMTP load control: only OTP verification and password-reset
+// emails are load-bearing for account access, so every other send*Email
+// function below short-circuits to a no-op while this is true. Flip to false
+// (or delete the guards) once bulk-import volume settles down.
+const NON_ESSENTIAL_EMAILS_DISABLED = true;
+
 // Create transporter
 const createTransporter = () => {
   // Check if email credentials are configured
@@ -139,6 +145,7 @@ export const sendOTPEmail = async (email, name, otp) => {
 
 // Send welcome email after verification
 export const sendWelcomeEmail = async (email, name, role) => {
+  if (NON_ESSENTIAL_EMAILS_DISABLED) { console.log(`Welcome email disabled for ${email}`); return true; }
   try {
     const transporter = createTransporter();
     
@@ -228,6 +235,7 @@ export const sendWelcomeEmail = async (email, name, role) => {
 
 // Send approval email
 export const sendApprovalEmail = async (email, name) => {
+  if (NON_ESSENTIAL_EMAILS_DISABLED) { console.log(`Approval email disabled for ${email}`); return true; }
   try {
     const transporter = createTransporter();
     
@@ -294,6 +302,7 @@ export const sendApprovalEmail = async (email, name) => {
 
 // Send decline email
 export const sendDeclineEmail = async (email, name, reason) => {
+  if (NON_ESSENTIAL_EMAILS_DISABLED) { console.log(`Decline email disabled for ${email}`); return true; }
   try {
     const transporter = createTransporter();
     
@@ -354,6 +363,7 @@ export const sendDeclineEmail = async (email, name, reason) => {
 
 // Send registration confirmation email
 export const sendRegistrationConfirmationEmail = async (email, name, eventTitle, eventDate, eventVenue) => {
+  if (NON_ESSENTIAL_EMAILS_DISABLED) { console.log(`Registration confirmation email disabled for ${email}`); return true; }
   try {
     const transporter = createTransporter();
     if (!transporter) {
@@ -405,6 +415,7 @@ export const sendRegistrationConfirmationEmail = async (email, name, eventTitle,
 
 // Send reminder email (24h before event)
 export const sendReminderEmail = async (email, name, eventTitle, eventDate, eventVenue) => {
+  if (NON_ESSENTIAL_EMAILS_DISABLED) { console.log(`Reminder email disabled for ${email}`); return true; }
   try {
     const transporter = createTransporter();
     if (!transporter) {
@@ -458,6 +469,7 @@ export const sendReminderEmail = async (email, name, eventTitle, eventDate, even
 // same day (separate from sendReminderEmail's 24h/1h-before wording, which
 // always says "tomorrow"/relative time and would read wrong for this one).
 export const sendTodayReminderEmail = async (email, name, eventTitle, eventDate, eventVenue) => {
+  if (NON_ESSENTIAL_EMAILS_DISABLED) { console.log(`Today-reminder email disabled for ${email}`); return true; }
   try {
     const transporter = createTransporter();
     if (!transporter) {
@@ -510,6 +522,7 @@ export const sendTodayReminderEmail = async (email, name, eventTitle, eventDate,
 // Send session-completed email — 5 minutes after an event's endAt, once
 // per event, to everyone who was registered/assigned to it.
 export const sendSessionCompletedEmail = async (email, name, eventTitle, eventDate, eventVenue) => {
+  if (NON_ESSENTIAL_EMAILS_DISABLED) { console.log(`Session-completed email disabled for ${email}`); return true; }
   try {
     const transporter = createTransporter();
     if (!transporter) {
@@ -561,6 +574,7 @@ export const sendSessionCompletedEmail = async (email, name, eventTitle, eventDa
 
 // Send quiz result email (pass or fail)
 export const sendQuizResultEmail = async (email, name, eventTitle, passed, score, passingScore) => {
+  if (NON_ESSENTIAL_EMAILS_DISABLED) { console.log(`Quiz result email disabled for ${email}`); return true; }
   try {
     const transporter = createTransporter();
     if (!transporter) return true;
@@ -604,6 +618,7 @@ export const sendQuizResultEmail = async (email, name, eventTitle, passed, score
 
 // Send course bundle registration email
 export const sendCourseBundleEmail = async (email, name, courseTitle, courseCode, workshopTitles) => {
+  if (NON_ESSENTIAL_EMAILS_DISABLED) { console.log(`Course bundle email disabled for ${email}`); return true; }
   try {
     const transporter = createTransporter();
     if (!transporter) return true;
@@ -644,6 +659,7 @@ export const sendCourseBundleEmail = async (email, name, courseTitle, courseCode
 
 // Send staff assignment email (Instructor / Associate Instructor / Volunteer)
 export const sendStaffAssignmentEmail = async (email, name, role, eventTitle, eventDate, eventVenue) => {
+  if (NON_ESSENTIAL_EMAILS_DISABLED) { console.log(`Staff assignment email disabled for ${email}`); return true; }
   try {
     const transporter = createTransporter();
     if (!transporter) return true;
@@ -754,6 +770,7 @@ export const sendPasswordResetEmail = async (email, name, resetLink) => {
 
 // Send pending approval notification email
 export const sendPendingApprovalEmail = async (email, name) => {
+  if (NON_ESSENTIAL_EMAILS_DISABLED) { console.log(`Pending approval email disabled for ${email}`); return true; }
   try {
     const transporter = createTransporter();
     
