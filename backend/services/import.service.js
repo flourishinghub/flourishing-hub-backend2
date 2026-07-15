@@ -179,8 +179,12 @@ const mapScheduleRowToEventPayload = (row, meta = {}) => {
   const courseName = normalizeString(
     getRowValue(row, ["courseName", "Course Name", "course", "workshop name", "workshopName"])
   );
+  // Includes the "batch_code" variants used by the separate Batch Assignment
+  // sheet — an admin who names their Events-import column the same way (a
+  // natural thing to do, since it's the same courseId+batch relationship)
+  // previously got no match here, silently leaving payload.batch empty.
   const tutorial = normalizeString(
-    getRowValue(row, ["tutorial", "session", "batch", "Batch", "tutorial/batch"])
+    getRowValue(row, ["tutorial", "session", "batch", "Batch", "tutorial/batch", "batch_code", "batchcode", "Batch Code", "BATCH_CODE"])
   );
   const sessionDate = getRowValue(row, ["sessionDate", "Session- Date", "date"]);
   const sessionTime = getRowValue(row, ["time", "sessionTime", "start time", "startTime"]);
@@ -266,7 +270,7 @@ const mapScheduleRowWithModule = (row, module, meta = {}) => {
     getRowValue(row, ["associate instructor", "associateInstructor", "associate_instructor"])
   );
   const quizLink = normalizeString(getRowValue(row, ["quiz link", "quizLink", "quiz_link"]));
-  const batch = normalizeString(getRowValue(row, ["tutorial/batch", "tutorial", "batch", "Batch", "session"]));
+  const batch = normalizeString(getRowValue(row, ["tutorial/batch", "tutorial", "batch", "Batch", "session", "batch_code", "batchcode", "Batch Code", "BATCH_CODE"]));
 
   const startAt = combineDateAndTime(sessionDate, sessionTime);
   if (!startAt) return null;
@@ -758,7 +762,22 @@ const importEvents = async (rows, meta, createdById) => {
       isCampusWide: normalizeBoolean(row.isCampusWide, true),
       allowVolunteerSignup: normalizeBoolean(row.allowVolunteerSignup, true),
       requiresCheckIn: normalizeBoolean(row.requiresCheckIn, true),
-      templateId: normalizeString(row.templateId) || normalizeString(meta.templateId)
+      templateId: normalizeString(row.templateId) || normalizeString(meta.templateId),
+      // These four were missing here entirely — any CSV using the standard
+      // "title" + "startAt" columns (the official Events template) silently
+      // dropped the modal's course/compulsory/batch selection: the created
+      // event ended up with no courseId (so its course badge fell back to a
+      // generic type label), registrationMode stayed the OPEN default (never
+      // actually COMPULSORY), and batch was empty — which made
+      // registerCourseBatchForEvent below a no-op, so no student was ever
+      // auto-registered. mapScheduleRowToEventPayload (the other branch) has
+      // always set these; this branch just never did.
+      courseId: normalizeString(row.courseId) || normalizeString(meta.courseId) || undefined,
+      courseModuleId: normalizeString(row.courseModuleId) || normalizeString(meta.courseModuleId) || undefined,
+      registrationMode: meta.workshopType === 'compulsory' ? 'COMPULSORY' : undefined,
+      batch: normalizeString(meta.batchCode) || normalizeString(
+        getRowValue(row, ["tutorial", "session", "batch", "Batch", "tutorial/batch", "batch_code", "batchcode", "Batch Code", "BATCH_CODE"])
+      ) || undefined
     };
 
     const payload =
