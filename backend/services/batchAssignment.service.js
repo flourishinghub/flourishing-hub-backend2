@@ -6,6 +6,11 @@ import { notifyCourseBundleRegistration } from "./course.service.js";
 
 const norm = (v) => (v === undefined || v === null ? null : String(v).trim() || null);
 const normLower = (v) => norm(v)?.toLowerCase() ?? null;
+// Roll numbers are matched case-insensitively (students may type "22b1234"
+// at signup while the admin's sheet has "22B1234"), so every roll number is
+// upper-cased at the point it's read — both from the uploaded sheet and from
+// existing DB rows — before any comparison or Map/Set lookup.
+const normRoll = (v) => norm(v)?.toUpperCase() ?? null;
 const normInt = (v) => { const n = parseInt(v); return isNaN(n) ? null : n; };
 
 const normalizeKey = (k) => k.trim().toLowerCase().replace(/[\s._\-/]+/g, '');
@@ -24,7 +29,7 @@ const parseAndValidateRows = async (fileBuffer, fileName) => {
   const errors = [];
   const parsedRows = rows.map((row, i) => {
     const email = normLower(getCol(row, ['email', 'Email', 'EMAIL']));
-    const rollNumber = norm(getCol(row, ['roll_no', 'rollno', 'roll_number', 'rollnumber', 'Roll No', 'Roll No.', 'Roll Number', 'RollNo', 'ROLL_NO', 'rollno.']));
+    const rollNumber = normRoll(getCol(row, ['roll_no', 'rollno', 'roll_number', 'rollnumber', 'Roll No', 'Roll No.', 'Roll Number', 'RollNo', 'ROLL_NO', 'rollno.']));
     const batchCode = norm(getCol(row, ['batch_code', 'batchcode', 'batch', 'Batch', 'Batch Code', 'BATCH', 'BATCH_CODE']));
     const name = norm(getCol(row, ['name', 'Name', 'NAME', 'Student Name', 'student_name']));
     const department = norm(getCol(row, ['department', 'dept', 'Department', 'DEPT', 'Dept']));
@@ -64,13 +69,13 @@ const findDuplicateRows = async (validRows, courseId) => {
       courseId,
       OR: [
         ...(emails.length ? [{ email: { in: emails } }] : []),
-        ...(rollNumbers.length ? [{ rollNumber: { in: rollNumbers } }] : [])
+        ...rollNumbers.map((r) => ({ rollNumber: { equals: r, mode: "insensitive" } }))
       ]
     }
   });
 
   const existingByEmail = new Set(existingAssignments.filter((a) => a.email).map((a) => a.email));
-  const existingByRollNumber = new Set(existingAssignments.filter((a) => a.rollNumber).map((a) => a.rollNumber));
+  const existingByRollNumber = new Set(existingAssignments.filter((a) => a.rollNumber).map((a) => a.rollNumber.toUpperCase()));
 
   return validRows.filter(
     (r) => (r.email && existingByEmail.has(r.email)) || (r.rollNumber && existingByRollNumber.has(r.rollNumber))
@@ -146,7 +151,24 @@ export const registerCourseBatchForEvent = async (eventId, courseId, batchCode) 
     skipDuplicates: true
   });
 
-  notifyCourseBundleRegistration(newUserIds, courseId).catch(() => {});
+  // newUserIds above is scoped to "not yet registered for THIS event" —
+  // that includes students who already belong to the bundle via another
+  // workshop of the same course+batch. Notifying on that broader set was
+  // re-sending the "enrolled in course bundle" email every time a new
+  // workshop got added to a course students were already in. Narrow it down
+  // to genuinely first-time bundle members (no prior registration in any
+  // OTHER event of this course) before notifying.
+  const priorBundleRegistrations = await prisma.eventRegistration.findMany({
+    where: { userId: { in: newUserIds }, event: { courseId, id: { not: eventId } } },
+    select: { userId: true },
+    distinct: ["userId"]
+  });
+  const priorBundleUserIds = new Set(priorBundleRegistrations.map((r) => r.userId));
+  const firstTimeUserIds = newUserIds.filter((id) => !priorBundleUserIds.has(id));
+
+  if (firstTimeUserIds.length) {
+    notifyCourseBundleRegistration(firstTimeUserIds, courseId).catch(() => {});
+  }
 };
 
 // courseId is required — every batch upload now belongs to a course (selected
@@ -209,7 +231,7 @@ export const uploadBatchAssignment = async ({ fileBuffer, fileName, courseId, re
       where: {
         OR: [
           ...(emails.length ? [{ email: { in: emails } }] : []),
-          ...(rollNumbers.length ? [{ studentProfile: { rollNumber: { in: rollNumbers } } }] : [])
+          ...rollNumbers.map((r) => ({ studentProfile: { rollNumber: { equals: r, mode: "insensitive" } } }))
         ]
       },
       include: { studentProfile: true }
@@ -219,7 +241,7 @@ export const uploadBatchAssignment = async ({ fileBuffer, fileName, courseId, re
         courseId,
         OR: [
           ...(emails.length ? [{ email: { in: emails } }] : []),
-          ...(rollNumbers.length ? [{ rollNumber: { in: rollNumbers } }] : [])
+          ...rollNumbers.map((r) => ({ rollNumber: { equals: r, mode: "insensitive" } }))
         ]
       }
     })
@@ -227,10 +249,10 @@ export const uploadBatchAssignment = async ({ fileBuffer, fileName, courseId, re
 
   const userByEmail = new Map(existingUsers.filter((u) => u.email).map((u) => [u.email.toLowerCase(), u]));
   const userByRollNumber = new Map(
-    existingUsers.filter((u) => u.studentProfile?.rollNumber).map((u) => [u.studentProfile.rollNumber, u])
+    existingUsers.filter((u) => u.studentProfile?.rollNumber).map((u) => [u.studentProfile.rollNumber.toUpperCase(), u])
   );
   const assignmentByEmail = new Map(existingAssignments.filter((a) => a.email).map((a) => [a.email, a]));
-  const assignmentByRollNumber = new Map(existingAssignments.filter((a) => a.rollNumber).map((a) => [a.rollNumber, a]));
+  const assignmentByRollNumber = new Map(existingAssignments.filter((a) => a.rollNumber).map((a) => [a.rollNumber.toUpperCase(), a]));
 
   for (const row of rowsToProcess) {
     const { rowNumber, email, rollNumber, batchCode, name, department, programme, yearOfStudy, section } = row;
@@ -304,7 +326,7 @@ export const autoAssignCohortOnSignup = async (userId, email, rollNumber) => {
         isMatched: false,
         OR: [
           ...(email ? [{ email: email.toLowerCase() }] : []),
-          ...(rollNumber ? [{ rollNumber }] : [])
+          ...(rollNumber ? [{ rollNumber: { equals: rollNumber, mode: "insensitive" } }] : [])
         ]
       }
     });
