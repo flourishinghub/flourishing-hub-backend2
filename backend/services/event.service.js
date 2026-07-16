@@ -182,9 +182,20 @@ export const listEvents = async (query, user) => {
   // Case-insensitive to match autoRegisterBatch's cohort comparison (import.service.js) —
   // otherwise a student auto-registered via a differently-cased batch code (e.g. admin
   // typed "D1T1", cohort stored as "d1t1") never sees the event in their own events list.
+  //
+  // Also let an already-registered student through regardless of match: the frontend
+  // sends this param from the single flattened StudentProfile.cohort field, but batch
+  // assignment is per-module now (see BatchAssignment.courseModuleId) — a student can
+  // be registered for a workshop whose own `batch` differs from their flat cohort.
+  // Without this escape, that workshop (including a currently-live one) silently
+  // vanished from the student's own dashboard/events list despite being registered.
   if (query.batch !== undefined) {
     andConditions.push({
-      OR: [{ batch: null }, ...(query.batch ? [{ batch: { equals: query.batch, mode: "insensitive" } }] : [])]
+      OR: [
+        { batch: null },
+        ...(query.batch ? [{ batch: { equals: query.batch, mode: "insensitive" } }] : []),
+        ...(user?.role === "STUDENT" ? [{ registrations: { some: { userId: user.id } } }] : [])
+      ]
     });
   }
 
