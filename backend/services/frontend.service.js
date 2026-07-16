@@ -310,7 +310,7 @@ const buildStudentLikeProfile = async (userId, explicitRole) => {
             { batch: null },
             { courseId: null },
             { registrationMode: { not: "COMPULSORY" } },
-            { registrations: { some: { userId } } }
+            { registrations: { some: { userId, status: { not: "CANCELLED" } } } }
           ]
         }
       : {};
@@ -937,7 +937,7 @@ export const listFrontendEvents = async (user, explicitRole) => {
             { batch: null },
             { courseId: null },
             { registrationMode: { not: "COMPULSORY" } },
-            { registrations: { some: { userId: user.id } } }
+            { registrations: { some: { userId: user.id, status: { not: "CANCELLED" } } } }
           ]
         }
       : {};

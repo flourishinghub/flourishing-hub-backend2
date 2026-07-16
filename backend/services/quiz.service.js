@@ -29,7 +29,11 @@ const resolveEventId = async ({ eventId, courseId, eventTitle, formId, userId })
     const event = await prisma.event.findFirst({
       where: {
         quizLink: { contains: formId },
-        registrations: { some: { userId } }
+        // A soft-cancelled (batch-reassigned) old registration must not
+        // count here — otherwise a student with a stale registration on a
+        // superseded batch's event can get their quiz score misrouted to
+        // that old event instead of the one they're actually attending.
+        registrations: { some: { userId, status: { not: "CANCELLED" } } }
       },
       select: { id: true }
     });
@@ -54,7 +58,7 @@ const resolveEventId = async ({ eventId, courseId, eventTitle, formId, userId })
     where: {
       courseId,
       ...(eventTitle ? { title: { equals: eventTitle, mode: "insensitive" } } : {}),
-      registrations: { some: { userId } }
+      registrations: { some: { userId, status: { not: "CANCELLED" } } }
     },
     select: { id: true }
   });

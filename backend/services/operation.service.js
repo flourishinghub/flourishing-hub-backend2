@@ -415,6 +415,10 @@ export const getMyAttendance = async (userId) => {
     prisma.eventRegistration.findMany({
       where: {
         userId,
+        // Excludes soft-cancelled (batch-reassignment leftover) registrations
+        // — otherwise a superseded old batch's session still showed up in
+        // Past Records alongside the corrected one for the same module.
+        status: { not: "CANCELLED" },
         event: { endAt: { lt: new Date() } }
       },
       include: {

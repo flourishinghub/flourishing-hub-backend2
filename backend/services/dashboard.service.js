@@ -1,4 +1,7 @@
+import { StatusCodes } from "http-status-codes";
+
 import { prisma } from "../database/prisma.js";
+import { ApiError } from "../utils/ApiError.js";
 
 // Statuses that no longer occupy a seat — excluded from "occupied seat" counts.
 const INACTIVE_REGISTRATION_STATUSES = ["CANCELLED", "NO_SHOW", "WAITLISTED"];
@@ -23,7 +26,7 @@ export const getStudentDashboardData = async (userId) => {
   });
 
   if (!user?.studentProfile) {
-    throw new Error("Student profile not found");
+    throw new ApiError(StatusCodes.NOT_FOUND, "Student profile not found");
   }
 
   const [registrations, moduleProgress, attendanceRecords, allEvents] = await Promise.all([
@@ -748,8 +751,11 @@ export const getStudentBundleProgress = async (userId) => {
     }),
     // userId is the leftmost column of @@index([userId, registeredAt]) on
     // EventRegistration, so this is a single indexed lookup, not a scan.
+    // Excludes CANCELLED (soft-cancelled batch-reassignment leftovers) —
+    // otherwise a student whose batch was corrected still saw both the old
+    // and new workshop for the same module in this list.
     prisma.eventRegistration.findMany({
-      where: { userId },
+      where: { userId, status: { not: "CANCELLED" } },
       select: { eventId: true },
     }),
   ]);

@@ -194,7 +194,7 @@ export const listEvents = async (query, user) => {
       OR: [
         { batch: null },
         ...(query.batch ? [{ batch: { equals: query.batch, mode: "insensitive" } }] : []),
-        ...(user?.role === "STUDENT" ? [{ registrations: { some: { userId: user.id } } }] : [])
+        ...(user?.role === "STUDENT" ? [{ registrations: { some: { userId: user.id, status: { not: "CANCELLED" } } } }] : [])
       ]
     });
   }
@@ -213,13 +213,18 @@ export const listEvents = async (query, user) => {
   // free-text field, also used on standalone/open workshops just as a
   // descriptive tag (e.g. "Btech") with no real BatchAssignment behind it.
   // Restricting on batch alone previously hid those from every student.
+  // A registration whose batch was later reassigned (student moved from one
+  // batch to another within the same module) gets soft-cancelled — status
+  // set to CANCELLED rather than deleted, to keep the history — so it must
+  // be excluded here too, or the stale/old batch's workshop keeps showing
+  // as "theirs" alongside the new one.
   if (user?.role === "STUDENT") {
     andConditions.push({
       OR: [
         { batch: null },
         { courseId: null },
         { registrationMode: { not: "COMPULSORY" } },
-        { registrations: { some: { userId: user.id } } }
+        { registrations: { some: { userId: user.id, status: { not: "CANCELLED" } } } }
       ]
     });
   }
