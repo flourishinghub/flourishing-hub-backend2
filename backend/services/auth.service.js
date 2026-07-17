@@ -103,21 +103,30 @@ export const register = async (payload) => {
       include: { user: true }
     });
     if (existingRoll) {
-      // Same dead-end the email-match branch above avoids: if the account
-      // sitting on this roll number never got verified (most often because
-      // the OTP email itself never arrived), hard-blocking the retry would
-      // strand the student with no way back into their own account. Resend
-      // to that account instead of creating a duplicate.
-      if (!existingRoll.user.isVerified) {
+      // "Not yet a real, confirmed account" covers two cases, not just
+      // isVerified: false — a non-IITB signup (personal Gmail, common typo
+      // like "oitb.ac.in") gets isVerified: true immediately since it skips
+      // OTP entirely, but PENDING_APPROVAL means no admin has actually
+      // confirmed it's them either. Without also catching that case here, a
+      // student who first signed up with the wrong email domain — never
+      // received an OTP because there was none to receive — hits a hard
+      // "already registered" wall the moment they try to correct it to
+      // their real @iitb.ac.in address, with no way back into either
+      // account.
+      const existingIsUnclaimed = !existingRoll.user.isVerified || existingRoll.user.approvalStatus === "PENDING_APPROVAL";
+      if (existingIsUnclaimed) {
         const retryEmail = payload.email.trim().toLowerCase();
         let targetEmail = existingRoll.user.email;
+        let emailChanged = false;
 
         // They gave the SAME roll number again but a DIFFERENT email — the
-        // most likely explanation is the first attempt's email was a typo
-        // and this is the correction, not a different person (roll numbers
-        // aren't guessable). Resending to the old, unreachable address
-        // would just repeat the original failure forever. Update the still-
-        // unverified account's email instead, so the OTP actually lands.
+        // most likely explanation is the first attempt's email was wrong
+        // (typo, or a personal address used by mistake) and this is the
+        // correction, not a different person (roll numbers aren't
+        // guessable). Resending to the old, unreachable/unintended address
+        // would just repeat the original failure forever. Update the
+        // still-unclaimed account's email instead, so the OTP (or approval
+        // notice) actually lands.
         if (retryEmail !== existingRoll.user.email) {
           const retryIsIITB = retryEmail.endsWith('@iitb.ac.in');
           await prisma.user.update({
@@ -129,6 +138,7 @@ export const register = async (payload) => {
             }
           });
           targetEmail = retryEmail;
+          emailChanged = true;
 
           if (!retryIsIITB) {
             const { sendPendingApprovalEmail } = await import("./email.service.js");
@@ -145,6 +155,21 @@ export const register = async (payload) => {
               message: "Your account has been created and is pending admin approval. You will receive an email once approved."
             };
           }
+        }
+
+        // Same email as before, account still just sitting in
+        // PENDING_APPROVAL (non-IITB, isVerified already true — no OTP to
+        // resend) — nothing to do but tell them it's still awaiting approval.
+        if (!emailChanged && existingRoll.user.isVerified) {
+          return {
+            userId: existingRoll.userId,
+            email: existingRoll.user.email,
+            name: existingRoll.user.name,
+            role: existingRoll.user.role,
+            approvalStatus: existingRoll.user.approvalStatus,
+            requiresApproval: true,
+            message: "Your account has been created and is pending admin approval. You will receive an email once approved."
+          };
         }
 
         await resendOTP(existingRoll.userId).catch((err) => {
