@@ -317,6 +317,13 @@ export const uploadBatchAssignment = async ({ fileBuffer, fileName, courseId, re
       // this row unmatched means the FIRST account that actually verifies
       // with this email/roll number picks it up, whichever one that is.
       if (existingUser?.studentProfile && existingUser.isVerified) {
+        // A re-upload correcting this student's batch for the SAME module
+        // (e.g. M1B2 -> M1B5) previously just added the new registration —
+        // nothing ever cancelled the one for the batch they're being moved
+        // OUT of, leaving it behind to show up as a second, stale "your
+        // session" alongside the corrected one.
+        const previousBatchCode = existingAssignment?.batchCode;
+
         // Student already signed up — update their profile and the BatchAssignment
         // reference row atomically (both writes succeed together, or neither does).
         const [, assignment] = await prisma.$transaction([
@@ -341,6 +348,17 @@ export const uploadBatchAssignment = async ({ fileBuffer, fileName, courseId, re
         savedAssignment = assignment;
         results.matched++;
         await registerUserForCourseBatchEvents(existingUser.id, courseId, batchCode);
+
+        if (previousBatchCode && previousBatchCode !== batchCode) {
+          await prisma.eventRegistration.updateMany({
+            where: {
+              userId: existingUser.id,
+              status: { not: "CANCELLED" },
+              event: { courseId, courseModuleId, batch: previousBatchCode }
+            },
+            data: { status: "CANCELLED" }
+          });
+        }
       } else {
         // Student hasn't signed up yet — store for later
         savedAssignment = existingAssignment
