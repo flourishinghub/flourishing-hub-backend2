@@ -2,6 +2,7 @@ import { prisma } from "../database/prisma.js";
 import { ApiError } from "../utils/ApiError.js";
 import { StatusCodes } from "http-status-codes";
 import { generateOTP, sendOTPEmail } from "./email.service.js";
+import { autoAssignCohortOnSignup } from "./batchAssignment.service.js";
 
 // Create and send OTP
 export const createAndSendOTP = async (userId, email, name) => {
@@ -71,29 +72,43 @@ export const verifyOTP = async (userId, otp) => {
       throw new ApiError(StatusCodes.BAD_REQUEST, "Maximum attempts exceeded. Please request a new OTP");
     }
 
-    // Increment attempts
-    await prisma.emailVerification.update({
-      where: { id: otpRecord.id },
+    // Atomically claim this OTP (increment attempts + mark used in one
+    // conditional write). Two near-simultaneous verify calls for the same
+    // OTP — a double-tap, or two open tabs — would otherwise both pass the
+    // `isUsed: false` check above before either commits, both mark the user
+    // verified, and both trigger a second welcome email. Scoping the update
+    // to `isUsed: false` means only the first of the two can ever match.
+    const claimed = await prisma.emailVerification.updateMany({
+      where: { id: otpRecord.id, isUsed: false },
       data: {
-        attempts: otpRecord.attempts + 1
-      }
-    });
-
-    // Mark OTP as used
-    await prisma.emailVerification.update({
-      where: { id: otpRecord.id },
-      data: {
+        attempts: otpRecord.attempts + 1,
         isUsed: true
       }
     });
 
+    if (claimed.count === 0) {
+      throw new ApiError(StatusCodes.BAD_REQUEST, "Invalid OTP");
+    }
+
     // Mark user as verified
-    await prisma.user.update({
+    const verifiedUser = await prisma.user.update({
       where: { id: userId },
       data: {
         isVerified: true
-      }
+      },
+      include: { studentProfile: true }
     });
+
+    // Batch/cohort matching is deliberately deferred to here (not signup)
+    // — see the comment in auth.service.js's register(). Only now is it
+    // actually proven this is who they say they are.
+    if (verifiedUser.studentProfile) {
+      await autoAssignCohortOnSignup(
+        verifiedUser.id,
+        verifiedUser.email,
+        verifiedUser.studentProfile.rollNumber
+      ).catch(() => {});
+    }
 
     return { success: true };
   } catch (error) {

@@ -308,7 +308,15 @@ export const uploadBatchAssignment = async ({ fileBuffer, fileName, courseId, re
 
       let savedAssignment;
 
-      if (existingUser?.studentProfile) {
+      // Also requires isVerified: an account that only exists because of an
+      // incomplete signup (OTP never entered — often because the OTP email
+      // itself never arrived) isn't "this student" yet as far as anyone can
+      // prove. Matching to it immediately let that dead account permanently
+      // claim the registration — the real account created once they signed
+      // up properly (possibly with a corrected email) never got it. Leaving
+      // this row unmatched means the FIRST account that actually verifies
+      // with this email/roll number picks it up, whichever one that is.
+      if (existingUser?.studentProfile && existingUser.isVerified) {
         // Student already signed up — update their profile and the BatchAssignment
         // reference row atomically (both writes succeed together, or neither does).
         const [, assignment] = await prisma.$transaction([

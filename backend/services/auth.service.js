@@ -109,15 +109,53 @@ export const register = async (payload) => {
       // strand the student with no way back into their own account. Resend
       // to that account instead of creating a duplicate.
       if (!existingRoll.user.isVerified) {
+        const retryEmail = payload.email.trim().toLowerCase();
+        let targetEmail = existingRoll.user.email;
+
+        // They gave the SAME roll number again but a DIFFERENT email — the
+        // most likely explanation is the first attempt's email was a typo
+        // and this is the correction, not a different person (roll numbers
+        // aren't guessable). Resending to the old, unreachable address
+        // would just repeat the original failure forever. Update the still-
+        // unverified account's email instead, so the OTP actually lands.
+        if (retryEmail !== existingRoll.user.email) {
+          const retryIsIITB = retryEmail.endsWith('@iitb.ac.in');
+          await prisma.user.update({
+            where: { id: existingRoll.userId },
+            data: {
+              email: retryEmail,
+              isVerified: retryIsIITB ? false : true,
+              approvalStatus: retryIsIITB ? "APPROVED" : "PENDING_APPROVAL"
+            }
+          });
+          targetEmail = retryEmail;
+
+          if (!retryIsIITB) {
+            const { sendPendingApprovalEmail } = await import("./email.service.js");
+            await sendPendingApprovalEmail(retryEmail, existingRoll.user.name).catch((err) =>
+              console.error("Pending-approval email failed during roll-number email correction:", err.message)
+            );
+            return {
+              userId: existingRoll.userId,
+              email: retryEmail,
+              name: existingRoll.user.name,
+              role: existingRoll.user.role,
+              approvalStatus: "PENDING_APPROVAL",
+              requiresApproval: true,
+              message: "Your account has been created and is pending admin approval. You will receive an email once approved."
+            };
+          }
+        }
+
         await resendOTP(existingRoll.userId).catch((err) => {
           console.error("OTP resend during roll-number re-registration failed:", err.message);
         });
         return {
           userId: existingRoll.userId,
-          email: existingRoll.user.email,
+          email: targetEmail,
           name: existingRoll.user.name,
           role: existingRoll.user.role,
-          isVerified: existingRoll.user.isVerified,
+          isVerified: false,
           requiresOTP: true
         };
       }
@@ -181,13 +219,15 @@ export const register = async (payload) => {
     throw error;
   }
 
-  // Auto-assign cohort if BatchAssignment record exists
-  if (user.studentProfile) {
-    await autoAssignCohortOnSignup(user.id, user.email, payload.studentProfile?.rollNumber).catch(() => {});
-  }
-
   if (isIITBEmail) {
-    // IITB email: send OTP for verification, but don't let a failed send (SMTP
+    // Deliberately NOT auto-assigning the batch/cohort match here — this
+    // account is still isVerified: false (nobody has proven this email is
+    // really theirs yet). Matching now would let an abandoned signup
+    // (mistyped email, OTP never arrived) permanently claim the student's
+    // course registrations before the real, verified account exists. The
+    // match happens in verifyOTP() instead, once isVerified actually flips.
+
+    // Send OTP for verification, but don't let a failed send (SMTP
     // outage, expired app password, etc.) fail the whole registration — the
     // user is already created above, so throwing here would return an error
     // to the student while leaving them stuck: signup "failed" yet retrying
@@ -206,12 +246,18 @@ export const register = async (payload) => {
       requiresOTP: true
     };
   } else {
+    // Non-IITB accounts are already isVerified: true at this point (they
+    // gate on admin approval instead of OTP) — safe to match immediately.
+    if (user.studentProfile) {
+      await autoAssignCohortOnSignup(user.id, user.email, payload.studentProfile?.rollNumber).catch(() => {});
+    }
+
     // Non-IITB email: Notify user about pending approval
     const { sendPendingApprovalEmail } = await import("./email.service.js");
-    await sendPendingApprovalEmail(user.email, user.name).catch(err => 
+    await sendPendingApprovalEmail(user.email, user.name).catch(err =>
       console.error("Failed to send pending approval email:", err)
     );
-    
+
     return {
       userId: user.id,
       email: user.email,
