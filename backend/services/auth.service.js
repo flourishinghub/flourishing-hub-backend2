@@ -83,35 +83,57 @@ export const register = async (payload) => {
 
   // Check if email is IITB email
   const isIITBEmail = payload.email.toLowerCase().endsWith('@iitb.ac.in');
-  
-  const user = await prisma.user.create({
-    data: {
-      name: payload.name,
-      email: payload.email.toLowerCase(),
-      passwordHash,
-      role: payload.role,
-      profileImageUrl: payload.profileImageUrl,
-      isVerified: isIITBEmail ? false : true, // IITB emails need OTP, others need admin approval
-      approvalStatus: isIITBEmail ? "APPROVED" : "PENDING_APPROVAL", // Non-IITB emails need admin approval
-      studentProfile: payload.studentProfile
-        ? {
-            create: payload.studentProfile
-          }
-        : undefined,
-      instructorProfile:
-        payload.role === "INSTRUCTOR" || payload.instructorProfile
+
+  let user;
+  try {
+    user = await prisma.user.create({
+      data: {
+        name: payload.name,
+        email: payload.email.toLowerCase(),
+        passwordHash,
+        role: payload.role,
+        profileImageUrl: payload.profileImageUrl,
+        isVerified: isIITBEmail ? false : true, // IITB emails need OTP, others need admin approval
+        approvalStatus: isIITBEmail ? "APPROVED" : "PENDING_APPROVAL", // Non-IITB emails need admin approval
+        studentProfile: payload.studentProfile
           ? {
-              create: payload.instructorProfile || {}
+              create: payload.studentProfile
             }
           : undefined,
-      adminProfile: undefined
-    },
-    include: {
-      studentProfile: true,
-      instructorProfile: true,
-      adminProfile: true
+        instructorProfile:
+          payload.role === "INSTRUCTOR" || payload.instructorProfile
+            ? {
+                create: payload.instructorProfile || {}
+              }
+            : undefined,
+        adminProfile: undefined
+      },
+      include: {
+        studentProfile: true,
+        instructorProfile: true,
+        adminProfile: true
+      }
+    });
+  } catch (error) {
+    // A raw Prisma unique-constraint violation (P2002) previously fell
+    // straight through to the global error handler's generic "Something
+    // went wrong" — the earlier findUnique(email) check above doesn't catch
+    // a duplicate rollNumber (StudentProfile.rollNumber is also @unique),
+    // and two near-simultaneous signups with the same email can both pass
+    // that check before either INSERT commits. Surface a specific,
+    // actionable message for both instead of an opaque failure.
+    if (error.code === "P2002") {
+      const target = Array.isArray(error.meta?.target) ? error.meta.target.join(",") : String(error.meta?.target || "");
+      if (target.includes("rollNumber")) {
+        throw new ApiError(StatusCodes.CONFLICT, "This roll number / employee ID is already registered to another account.");
+      }
+      if (target.includes("email")) {
+        throw new ApiError(StatusCodes.CONFLICT, "Email is already registered");
+      }
+      throw new ApiError(StatusCodes.CONFLICT, "An account with these details already exists.");
     }
-  });
+    throw error;
+  }
 
   // Auto-assign cohort if BatchAssignment record exists
   if (user.studentProfile) {
