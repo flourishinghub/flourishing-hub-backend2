@@ -48,7 +48,7 @@ export const register = async (payload) => {
   }
 
   const existingUser = await prisma.user.findUnique({
-    where: { email: payload.email.toLowerCase() }
+    where: { email: payload.email.trim().toLowerCase() }
   });
 
   if (existingUser) {
@@ -79,17 +79,63 @@ export const register = async (payload) => {
     );
   }
 
+  // A stray leading/trailing space typed into the signup form's roll-number
+  // field survives untrimmed here, then never matches a batch-CSV row again
+  // — CSV rows already go through normRoll() (trim + uppercase) in
+  // batchAssignment.service.js, so "25M0929 " (this signup) vs "25M0929"
+  // (the CSV) are different strings even under a case-insensitive compare,
+  // since insensitive only ignores case, not whitespace.
+  if (payload.studentProfile?.rollNumber) {
+    payload.studentProfile.rollNumber = payload.studentProfile.rollNumber.trim();
+  }
+
+  // StudentProfile.rollNumber is @unique, but that's a case-SENSITIVE
+  // Postgres constraint while every lookup elsewhere in the app (batch
+  // matching, admin search) treats roll numbers case-insensitively. Without
+  // this check, "25M0220" and "25m0220" pass the DB's unique constraint as
+  // two different values, silently creating a second account for the same
+  // student — e.g. after an unverified first attempt (OTP never arrived)
+  // they retry with different casing and now have two accounts, with their
+  // course batch data matched to whichever one existed first.
+  if (payload.studentProfile?.rollNumber) {
+    const existingRoll = await prisma.studentProfile.findFirst({
+      where: { rollNumber: { equals: payload.studentProfile.rollNumber, mode: "insensitive" } },
+      include: { user: true }
+    });
+    if (existingRoll) {
+      // Same dead-end the email-match branch above avoids: if the account
+      // sitting on this roll number never got verified (most often because
+      // the OTP email itself never arrived), hard-blocking the retry would
+      // strand the student with no way back into their own account. Resend
+      // to that account instead of creating a duplicate.
+      if (!existingRoll.user.isVerified) {
+        await resendOTP(existingRoll.userId).catch((err) => {
+          console.error("OTP resend during roll-number re-registration failed:", err.message);
+        });
+        return {
+          userId: existingRoll.userId,
+          email: existingRoll.user.email,
+          name: existingRoll.user.name,
+          role: existingRoll.user.role,
+          isVerified: existingRoll.user.isVerified,
+          requiresOTP: true
+        };
+      }
+      throw new ApiError(StatusCodes.CONFLICT, "This roll number / employee ID is already registered to another account.");
+    }
+  }
+
   const passwordHash = await bcrypt.hash(payload.password, 12);
 
   // Check if email is IITB email
-  const isIITBEmail = payload.email.toLowerCase().endsWith('@iitb.ac.in');
+  const isIITBEmail = payload.email.trim().toLowerCase().endsWith('@iitb.ac.in');
 
   let user;
   try {
     user = await prisma.user.create({
       data: {
         name: payload.name,
-        email: payload.email.toLowerCase(),
+        email: payload.email.trim().toLowerCase(),
         passwordHash,
         role: payload.role,
         profileImageUrl: payload.profileImageUrl,
