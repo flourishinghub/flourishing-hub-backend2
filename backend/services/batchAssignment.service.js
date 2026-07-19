@@ -109,20 +109,16 @@ const findDuplicateRows = async (validRows, courseId) => {
   return validRows.filter((r) => existingKeys.has(key(r.email, r.rollNumber, r.courseModuleId)));
 };
 
-// findDuplicateRows only catches a row colliding with something already in
-// the database — it says nothing about the SAME student appearing twice
-// within this one file for the same module (e.g. accidentally listed in
-// both the 11am and 2:30pm batch of the same module). Nothing else in the
-// upload path checks for that: the per-row loop below builds up its
-// in-memory assignment map as it goes, so the second occurrence just
-// updates the row the first occurrence created — batchCode silently ends
-// up whichever one was LAST in the file, with no error, no warning, and no
-// record of the earlier batch ever existing. Surfaced here as its own
-// duplicate list (second-and-later occurrence of each repeated
-// courseModuleId+student key) so it goes through the same admin-resolution
-// screen instead of resolving itself silently.
+// A student can legitimately be listed twice for the same module in one
+// file — e.g. genuinely scheduled into both the 11am and 2:30pm batch —
+// and both should be kept; see the per-row loop below, which now creates a
+// separate row per (module, batch, student) instead of the second row
+// overwriting the first. What's still worth flagging here is the narrower
+// case: the EXACT same (module, batch, student) repeated verbatim, which
+// is never intentional — always a copy-paste/export duplicate, not two
+// real sessions.
 const findIntraFileDuplicateRows = (validRows) => {
-  const key = (r) => `${r.courseModuleId || ''}::${(r.email || r.rollNumber?.toUpperCase() || '')}`;
+  const key = (r) => `${r.courseModuleId || ''}::${r.batchCode || ''}::${(r.email || r.rollNumber?.toUpperCase() || '')}`;
   const seen = new Set();
   const dupes = [];
   for (const r of validRows) {
@@ -269,7 +265,7 @@ export const uploadBatchAssignment = async ({ fileBuffer, fileName, courseId, re
         email: r.email,
         rollNumber: r.rollNumber,
         batchCode: r.batchCode,
-        reason: intraFileDuplicateRows.includes(r) ? 'Duplicate within this same file (same student, same module, listed twice)' : 'Already exists from a previous upload',
+        reason: intraFileDuplicateRows.includes(r) ? 'Exact same row (same student, same module, same batch) repeated in this file' : 'Already exists from a previous upload',
       })),
     };
   }
@@ -314,32 +310,60 @@ export const uploadBatchAssignment = async ({ fileBuffer, fileName, courseId, re
   const userByRollNumber = new Map(
     existingUsers.filter((u) => u.studentProfile?.rollNumber).map((u) => [u.studentProfile.rollNumber.toUpperCase(), u])
   );
-  // Keyed by (courseModuleId + email/roll) instead of just email/roll, so a
-  // student who already has a row for Module A's batch and is now being
-  // uploaded for Module B's batch gets a SECOND row (create) instead of the
-  // Module A row being overwritten (update) — which is what was happening
-  // before courseModuleId existed at all.
-  const assignmentKey = (courseModuleId, email, rollNumber) => `${courseModuleId || ''}::${email || rollNumber || ''}`;
-  const assignmentByKey = new Map(
-    existingAssignments
-      .filter((a) => a.email || a.rollNumber)
-      .flatMap((a) => {
-        const entries = [];
-        if (a.email) entries.push([assignmentKey(a.courseModuleId, a.email, null), a]);
-        if (a.rollNumber) entries.push([assignmentKey(a.courseModuleId, null, a.rollNumber.toUpperCase()), a]);
-        return entries;
-      })
-  );
+  // Two different lookups are needed, and conflating them is exactly what
+  // silently dropped a student's second batch before:
+  //  - moduleStudentKey (courseModuleId + student) finds whatever this
+  //    student was PREVIOUSLY assigned in this module BEFORE this upload
+  //    started — used only to decide whether an old batch should be
+  //    cancelled (a correction, e.g. M1B2 -> M1B5 in a later re-upload).
+  //  - moduleBatchStudentKey (courseModuleId + batch + student) finds the
+  //    row for this EXACT batch, so re-processing the identical row is an
+  //    update, not a duplicate create.
+  // moduleStudentKey is intentionally NOT updated as rows are processed —
+  // it stays a snapshot of what existed before this run. Two rows in the
+  // SAME file for the same student+module but different batches (a student
+  // genuinely scheduled into two sessions) must not cancel each other just
+  // because the second row's lookup finds what the first row created a
+  // moment ago.
+  const moduleStudentKey = (courseModuleId, email, rollNumber) => `${courseModuleId || ''}::${email || rollNumber || ''}`;
+  const moduleBatchStudentKey = (courseModuleId, batchCode, email, rollNumber) => `${courseModuleId || ''}::${batchCode || ''}::${email || rollNumber || ''}`;
+
+  // A student can walk in already holding MORE THAN ONE prior assignment
+  // for the same module (that's the whole point of the dual-batch case
+  // this now supports) — so this has to be a list per key, not a single
+  // value, or correcting them down to one batch later only ever cancels
+  // whichever prior assignment happened to be fetched last.
+  const preExistingByModuleStudent = new Map();
+  const preExistingByModuleBatchStudent = new Map();
+  const addToList = (map, k, v) => { if (!map.has(k)) map.set(k, []); map.get(k).push(v); };
+  for (const a of existingAssignments) {
+    if (!a.email && !a.rollNumber) continue;
+    const roll = a.rollNumber ? a.rollNumber.toUpperCase() : null;
+    if (a.email) addToList(preExistingByModuleStudent, moduleStudentKey(a.courseModuleId, a.email, null), a);
+    if (roll) addToList(preExistingByModuleStudent, moduleStudentKey(a.courseModuleId, null, roll), a);
+    if (a.email) preExistingByModuleBatchStudent.set(moduleBatchStudentKey(a.courseModuleId, a.batchCode, a.email, null), a);
+    if (roll) preExistingByModuleBatchStudent.set(moduleBatchStudentKey(a.courseModuleId, a.batchCode, null, roll), a);
+  }
+  // Which (module, student) combos this SAME run has already created/updated
+  // a row for — once a student+module pair is seen once, later rows for
+  // that pair in this run are additional batches, not corrections.
+  const processedThisRunByModuleStudent = new Set();
+  // Exact (module, batch, student) rows saved so far in THIS run — so if
+  // the identical row appears twice in one file (a plain copy-paste, still
+  // possible if admin overrides the duplicate warning), the second one
+  // updates the first instead of creating a second, redundant row.
+  const savedThisRunByModuleBatchStudent = new Map();
 
   for (const row of rowsToProcess) {
     const { rowNumber, email, rollNumber, batchCode, name, department, programme, yearOfStudy, section, courseModuleId } = row;
 
     try {
       const existingUser = (email && userByEmail.get(email)) || (rollNumber && userByRollNumber.get(rollNumber)) || null;
-      const existingAssignment =
-        (email && assignmentByKey.get(assignmentKey(courseModuleId, email, null))) ||
-        (rollNumber && assignmentByKey.get(assignmentKey(courseModuleId, null, rollNumber))) ||
-        null;
+      const msKey = moduleStudentKey(courseModuleId, email, rollNumber);
+      const mbsKey = moduleBatchStudentKey(courseModuleId, batchCode, email, rollNumber);
+      const exactExisting = savedThisRunByModuleBatchStudent.get(mbsKey) || preExistingByModuleBatchStudent.get(mbsKey) || null;
+      const isFirstRowForThisStudentInThisRun = !processedThisRunByModuleStudent.has(msKey);
+      const previousAssignments = isFirstRowForThisStudentInThisRun ? (preExistingByModuleStudent.get(msKey) || []) : [];
 
       let savedAssignment;
 
@@ -356,8 +380,16 @@ export const uploadBatchAssignment = async ({ fileBuffer, fileName, courseId, re
         // (e.g. M1B2 -> M1B5) previously just added the new registration —
         // nothing ever cancelled the one for the batch they're being moved
         // OUT of, leaving it behind to show up as a second, stale "your
-        // session" alongside the corrected one.
-        const previousBatchCode = existingAssignment?.batchCode;
+        // session" alongside the corrected one. Only fires for the first
+        // row of this student+module in this run, and covers EVERY prior
+        // batch (a student can walk in already holding more than one, from
+        // an earlier dual-batch upload) — not just one of them, or a
+        // correction down to a single batch left the others still active.
+        // A second batch for the same student within THIS same file must
+        // not trip this at all (previousAssignments is empty for it, see above).
+        const previousBatchCodes = [...new Set(
+          previousAssignments.filter((a) => a.batchCode !== batchCode).map((a) => a.batchCode)
+        )];
 
         // Student already signed up — update their profile and the BatchAssignment
         // reference row atomically (both writes succeed together, or neither does).
@@ -371,9 +403,9 @@ export const uploadBatchAssignment = async ({ fileBuffer, fileName, courseId, re
               ...(section !== null ? { section } : {}),
             }
           }),
-          existingAssignment
+          exactExisting
             ? prisma.batchAssignment.update({
-                where: { id: existingAssignment.id },
+                where: { id: exactExisting.id },
                 data: { email, rollNumber, batchCode, name, department, programme, yearOfStudy, section, courseId, courseModuleId, isMatched: true, matchedUserId: existingUser.id }
               })
             : prisma.batchAssignment.create({
@@ -384,21 +416,21 @@ export const uploadBatchAssignment = async ({ fileBuffer, fileName, courseId, re
         results.matched++;
         await registerUserForCourseBatchEvents(existingUser.id, courseId, batchCode);
 
-        if (previousBatchCode && previousBatchCode !== batchCode) {
+        if (previousBatchCodes.length > 0) {
           await prisma.eventRegistration.updateMany({
             where: {
               userId: existingUser.id,
               status: { not: "CANCELLED" },
-              event: { courseId, courseModuleId, batch: previousBatchCode }
+              event: { courseId, courseModuleId, batch: { in: previousBatchCodes } }
             },
             data: { status: "CANCELLED" }
           });
         }
       } else {
         // Student hasn't signed up yet — store for later
-        savedAssignment = existingAssignment
+        savedAssignment = exactExisting
           ? await prisma.batchAssignment.update({
-              where: { id: existingAssignment.id },
+              where: { id: exactExisting.id },
               data: { email, rollNumber, batchCode, name, department, programme, yearOfStudy, section, courseId, courseModuleId, isMatched: false, matchedUserId: null }
             })
           : await prisma.batchAssignment.create({
@@ -407,10 +439,8 @@ export const uploadBatchAssignment = async ({ fileBuffer, fileName, courseId, re
         results.stored++;
       }
 
-      // Keep the in-memory lookup fresh so duplicate email/roll_no rows later in the
-      // same file update this record instead of racing to create a duplicate.
-      if (email) assignmentByKey.set(assignmentKey(courseModuleId, email, null), savedAssignment);
-      if (rollNumber) assignmentByKey.set(assignmentKey(courseModuleId, null, rollNumber), savedAssignment);
+      processedThisRunByModuleStudent.add(msKey);
+      savedThisRunByModuleBatchStudent.set(mbsKey, savedAssignment);
     } catch (err) {
       results.errors.push({ row: rowNumber, message: err.message });
       results.skipped++;
