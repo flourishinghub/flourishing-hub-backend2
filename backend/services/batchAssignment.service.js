@@ -109,6 +109,34 @@ const findDuplicateRows = async (validRows, courseId) => {
   return validRows.filter((r) => existingKeys.has(key(r.email, r.rollNumber, r.courseModuleId)));
 };
 
+// findDuplicateRows only catches a row colliding with something already in
+// the database — it says nothing about the SAME student appearing twice
+// within this one file for the same module (e.g. accidentally listed in
+// both the 11am and 2:30pm batch of the same module). Nothing else in the
+// upload path checks for that: the per-row loop below builds up its
+// in-memory assignment map as it goes, so the second occurrence just
+// updates the row the first occurrence created — batchCode silently ends
+// up whichever one was LAST in the file, with no error, no warning, and no
+// record of the earlier batch ever existing. Surfaced here as its own
+// duplicate list (second-and-later occurrence of each repeated
+// courseModuleId+student key) so it goes through the same admin-resolution
+// screen instead of resolving itself silently.
+const findIntraFileDuplicateRows = (validRows) => {
+  const key = (r) => `${r.courseModuleId || ''}::${(r.email || r.rollNumber?.toUpperCase() || '')}`;
+  const seen = new Set();
+  const dupes = [];
+  for (const r of validRows) {
+    const k = key(r);
+    if (!k.replace(/^.*::/, '')) continue;
+    if (seen.has(k)) {
+      dupes.push(r);
+    } else {
+      seen.add(k);
+    }
+  }
+  return dupes;
+};
+
 // Registers one student into every COMPULSORY workshop of this exact
 // course + batch. Scoped by BatchAssignment's (courseId, batchCode) instead
 // of the student's free-text StudentProfile.cohort field, so a batch code
@@ -219,7 +247,13 @@ export const uploadBatchAssignment = async ({ fileBuffer, fileName, courseId, re
   }
 
   const validRows = await resolveModuleIds(parsedRows, courseId);
-  const duplicateRows = await findDuplicateRows(validRows, courseId);
+  const dbDuplicateRows = await findDuplicateRows(validRows, courseId);
+  const intraFileDuplicateRows = findIntraFileDuplicateRows(validRows);
+  // A row can be flagged by both checks (e.g. re-uploading a file that
+  // already has an internal repeat) — de-dupe by rowNumber before counting.
+  const duplicateRows = [...new Map(
+    [...dbDuplicateRows, ...intraFileDuplicateRows].map((r) => [r.rowNumber, r])
+  ).values()];
 
   if (!resolutionMode && duplicateRows.length > 0) {
     return {
@@ -235,6 +269,7 @@ export const uploadBatchAssignment = async ({ fileBuffer, fileName, courseId, re
         email: r.email,
         rollNumber: r.rollNumber,
         batchCode: r.batchCode,
+        reason: intraFileDuplicateRows.includes(r) ? 'Duplicate within this same file (same student, same module, listed twice)' : 'Already exists from a previous upload',
       })),
     };
   }
