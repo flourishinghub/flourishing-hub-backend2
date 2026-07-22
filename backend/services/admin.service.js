@@ -546,6 +546,65 @@ export const createEventFromModule = async (moduleId, eventData, createdById) =>
   });
 };
 
+const QUIZ_QUESTION_COUNT = 10;
+
+// In-built quiz authored directly on a standalone/open-workshop Event (no
+// course/module to hang it off). Course-linked events instead inherit their
+// quiz from event.courseModule — see services/courseModule.service.js.
+export const getEventQuiz = async (eventId) => {
+  const event = await prisma.event.findUnique({ where: { id: eventId } });
+  if (!event) {
+    throw new ApiError(StatusCodes.NOT_FOUND, "Event not found");
+  }
+
+  const quiz = await prisma.quiz.findUnique({
+    where: { eventId },
+    include: { questions: { orderBy: { order: "asc" } } }
+  });
+
+  return quiz || { eventId, questions: [] };
+};
+
+export const upsertEventQuiz = async (eventId, questions) => {
+  const event = await prisma.event.findUnique({ where: { id: eventId } });
+  if (!event) {
+    throw new ApiError(StatusCodes.NOT_FOUND, "Event not found");
+  }
+  if (event.courseModuleId) {
+    throw new ApiError(
+      StatusCodes.BAD_REQUEST,
+      "This event's quiz is inherited from its course module — edit the module's quiz instead"
+    );
+  }
+  if (!Array.isArray(questions) || questions.length !== QUIZ_QUESTION_COUNT) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, `Quiz must have exactly ${QUIZ_QUESTION_COUNT} questions`);
+  }
+
+  const quiz = await prisma.quiz.upsert({
+    where: { eventId },
+    update: {},
+    create: { eventId }
+  });
+
+  await prisma.$transaction([
+    prisma.quizQuestion.deleteMany({ where: { quizId: quiz.id } }),
+    prisma.quizQuestion.createMany({
+      data: questions.map((q, index) => ({
+        quizId: quiz.id,
+        order: index,
+        questionText: q.questionText,
+        optionA: q.optionA,
+        optionB: q.optionB,
+        optionC: q.optionC,
+        optionD: q.optionD,
+        correctOption: q.correctOption
+      }))
+    })
+  ]);
+
+  return getEventQuiz(eventId);
+};
+
 // GET EVENT ANALYTICS (workshops grouped by course/module)
 export const getEventAnalytics = async (filters = {}) => {
   const { courseId, moduleId } = filters;
@@ -649,6 +708,7 @@ export const getWorkshopAnalyticsTable = async () => {
       modules: {
         select: {
           id: true,
+          maxMarks: true,
           progressEntries: {
             select: { studentProfileId: true, marksObtained: true, completedAt: true }
           }
@@ -671,11 +731,13 @@ export const getWorkshopAnalyticsTable = async () => {
     event.modules.forEach(mod => {
       mod.progressEntries.forEach(p => {
         if (!progressMap[p.studentProfileId]) {
-          progressMap[p.studentProfileId] = { marks: null, completed: false };
+          progressMap[p.studentProfileId] = { marks: null, maxMarks: null, completed: false };
         }
         if (p.marksObtained != null) {
           progressMap[p.studentProfileId].marks =
             (progressMap[p.studentProfileId].marks || 0) + p.marksObtained;
+          progressMap[p.studentProfileId].maxMarks =
+            (progressMap[p.studentProfileId].maxMarks || 0) + (mod.maxMarks ?? 100);
         }
         if (p.completedAt) progressMap[p.studentProfileId].completed = true;
       });
@@ -696,6 +758,7 @@ export const getWorkshopAnalyticsTable = async () => {
         attendanceStatus: attendanceMap[reg.userId] || "NOT_MARKED",
         quizCompleted: progress?.completed || false,
         score: progress?.marks ?? null,
+        maxScore: progress?.maxMarks ?? null,
         rating: feedbackMap[reg.userId] || null,
         registrationStatus: reg.status
       };

@@ -248,6 +248,7 @@ model Event {
   checkIns              EventCheckIn[]
   attendances           AttendanceRecord[]
   feedbackEntries       Feedback[]
+  quiz                  Quiz?
 
   @@index([status, startAt])
   @@index([type, startAt])
@@ -267,6 +268,12 @@ model EventModule {
   maxMarks           Int?
   quizLink           String?
   feedbackLink       String?
+  // Set only on the EventModule auto-created to hold an in-built Quiz's
+  // submission for this event — lets score-recording target exactly that
+  // module instead of colliding with real pre-existing EventModules (from
+  // templates/bulk MARKS import) or the legacy Google-Form quiz path, which
+  // both pick modules by other means (earliest startAt, moduleTitle, etc.).
+  sourceQuizId       String?
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
   event              Event             @relation(fields: [eventId], references: [id], onDelete: Cascade)
@@ -274,6 +281,7 @@ model EventModule {
   attendances        AttendanceRecord[]
   checkIns           EventCheckIn[]
 
+  @@unique([eventId, sourceQuizId])
   @@index([eventId, startAt])
 }
 
@@ -495,9 +503,43 @@ model CourseModule {
   course          Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
   events          Event[]   @relation("EventFromModule")
   batchAssignments BatchAssignment[]
+  quiz            Quiz?
 
   @@index([courseId, order])
   @@index([isActive])
+}
+
+// A fixed 10-question MCQ quiz authored once, either on a reusable
+// CourseModule (shared by every per-batch Event instantiated from it) or
+// directly on a standalone Event that has no course/module (an open
+// workshop). Exactly one of courseModuleId/eventId is set — enforced in the
+// service layer, not the DB (Prisma can't express XOR on nullable uniques).
+model Quiz {
+  id             String   @id @default(cuid())
+  courseModuleId String?  @unique
+  eventId        String?  @unique
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  courseModule CourseModule?  @relation(fields: [courseModuleId], references: [id], onDelete: Cascade)
+  event        Event?         @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  questions    QuizQuestion[]
+}
+
+model QuizQuestion {
+  id            String @id @default(cuid())
+  quizId        String
+  order         Int
+  questionText  String
+  optionA       String
+  optionB       String
+  optionC       String
+  optionD       String
+  correctOption String // "A" | "B" | "C" | "D"
+
+  quiz Quiz @relation(fields: [quizId], references: [id], onDelete: Cascade)
+
+  @@index([quizId, order])
 }
 
 model BatchAssignment {

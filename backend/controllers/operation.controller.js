@@ -16,7 +16,9 @@ import {
   getEventAssignedVolunteers,
   getMyCheckIn,
   getMyEventProgress,
-  getMyFeedback
+  getMyFeedback,
+  getMyQuiz,
+  submitMyQuiz
 } from "../services/operation.service.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 
@@ -126,4 +128,14 @@ export const getEventAssignedVolunteersController = asyncHandler(async (req, res
 export const getMyEventProgressController = asyncHandler(async (req, res) => {
   const data = await getMyEventProgress(req.params.eventId, req.user);
   res.status(StatusCodes.OK).json({ success: true, data });
+});
+
+export const getMyQuizController = asyncHandler(async (req, res) => {
+  const data = await getMyQuiz(req.params.eventId, req.user);
+  res.status(StatusCodes.OK).json({ success: true, data });
+});
+
+export const submitMyQuizController = asyncHandler(async (req, res) => {
+  const data = await submitMyQuiz(req.validated.params.eventId, req.validated.body, req.user);
+  res.status(StatusCodes.OK).json({ success: true, message: "Quiz submitted successfully", data });
 });

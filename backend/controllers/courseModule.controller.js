@@ -1,5 +1,6 @@
 import { StatusCodes } from "http-status-codes";
 import * as courseModuleService from "../services/courseModule.service.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
 
 export const listModules = async (req, res, next) => {
   try {
@@ -58,6 +59,18 @@ export const deleteModule = async (req, res, next) => {
     next(error);
   }
 };
+
+export const getModuleQuiz = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const quiz = await courseModuleService.getModuleQuiz(id);
+  res.status(StatusCodes.OK).json({ success: true, data: quiz });
+});
+
+export const saveModuleQuiz = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const quiz = await courseModuleService.upsertModuleQuiz(id, req.validated.body.questions);
+  res.status(StatusCodes.OK).json({ success: true, message: "Quiz saved successfully", data: quiz });
+});
 
 export const getModuleUsage = async (req, res, next) => {
   try {

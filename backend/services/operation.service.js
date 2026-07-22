@@ -554,6 +554,164 @@ export const getMyEventProgress = async (eventId, actor) => {
   };
 };
 
+// Resolves the Quiz "owning" an event: a course-linked event's quiz lives on
+// its shared CourseModule (every per-batch Event of that module reuses the
+// same questions); a standalone/open-workshop event's quiz lives directly
+// on the Event. Returns null if no in-built quiz has been configured for
+// either (caller should then fall back to the legacy Google-Form quizLink).
+const resolveEventQuiz = async (eventId) => {
+  const event = await prisma.event.findUnique({
+    where: { id: eventId },
+    select: { id: true, title: true, startAt: true, endAt: true, courseModuleId: true }
+  });
+  if (!event) {
+    throw new ApiError(StatusCodes.NOT_FOUND, "Event not found");
+  }
+
+  const quiz = event.courseModuleId
+    ? await prisma.quiz.findUnique({ where: { courseModuleId: event.courseModuleId } })
+    : await prisma.quiz.findUnique({ where: { eventId: event.id } });
+
+  return { event, quiz };
+};
+
+const isAttendanceVerified = async (eventId, userId) => {
+  const attendance = await prisma.attendanceRecord.findFirst({
+    where: { eventId, userId },
+    orderBy: { markedAt: "desc" }
+  });
+  return attendance?.status === "PRESENT";
+};
+
+export const getMyQuiz = async (eventId, actor) => {
+  const { quiz } = await resolveEventQuiz(eventId);
+  if (!quiz) {
+    return { available: false };
+  }
+  if (!actor.studentProfile) {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Only students can take this quiz");
+  }
+
+  const verified = await isAttendanceVerified(eventId, actor.id);
+  if (!verified) {
+    return { available: true, locked: true };
+  }
+
+  const quizModule = await prisma.eventModule.findUnique({
+    where: { eventId_sourceQuizId: { eventId, sourceQuizId: quiz.id } }
+  });
+
+  if (quizModule) {
+    const progress = await prisma.moduleProgress.findUnique({
+      where: {
+        studentProfileId_moduleId: {
+          studentProfileId: actor.studentProfile.id,
+          moduleId: quizModule.id
+        }
+      }
+    });
+    if (progress?.completedAt) {
+      return {
+        available: true,
+        locked: false,
+        alreadySubmitted: true,
+        score: progress.marksObtained,
+        maxScore: 10
+      };
+    }
+  }
+
+  const questions = await prisma.quizQuestion.findMany({
+    where: { quizId: quiz.id },
+    orderBy: { order: "asc" },
+    // correctOption is intentionally never selected here — the student
+    // response must never carry the answer key.
+    select: {
+      id: true,
+      order: true,
+      questionText: true,
+      optionA: true,
+      optionB: true,
+      optionC: true,
+      optionD: true
+    }
+  });
+
+  return { available: true, locked: false, alreadySubmitted: false, questions };
+};
+
+export const submitMyQuiz = async (eventId, payload, actor) => {
+  const { event, quiz } = await resolveEventQuiz(eventId);
+  if (!quiz) {
+    throw new ApiError(StatusCodes.NOT_FOUND, "No quiz is configured for this event");
+  }
+  if (!actor.studentProfile) {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Only students can submit this quiz");
+  }
+
+  const verified = await isAttendanceVerified(eventId, actor.id);
+  if (!verified) {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Attendance must be verified before taking the quiz");
+  }
+
+  // Dedicated EventModule for this quiz, race-free via the (eventId,
+  // sourceQuizId) unique constraint — never collides with real pre-existing
+  // EventModules (templates, bulk MARKS import) or the legacy Google-Form
+  // quiz path's own module lookup.
+  const quizModule = await prisma.eventModule.upsert({
+    where: { eventId_sourceQuizId: { eventId, sourceQuizId: quiz.id } },
+    update: {},
+    create: {
+      eventId,
+      sourceQuizId: quiz.id,
+      title: event.title,
+      startAt: event.startAt,
+      endAt: event.endAt ?? event.startAt,
+      maxMarks: 10
+    }
+  });
+
+  const existingProgress = await prisma.moduleProgress.findUnique({
+    where: {
+      studentProfileId_moduleId: {
+        studentProfileId: actor.studentProfile.id,
+        moduleId: quizModule.id
+      }
+    }
+  });
+  if (existingProgress?.completedAt) {
+    throw new ApiError(StatusCodes.CONFLICT, "You have already submitted this quiz");
+  }
+
+  const questions = await prisma.quizQuestion.findMany({ where: { quizId: quiz.id } });
+  const correctByQuestionId = new Map(questions.map((q) => [q.id, q.correctOption]));
+
+  let score = 0;
+  for (const answer of payload.answers) {
+    if (correctByQuestionId.get(answer.questionId) === answer.selectedOption) {
+      score += 1;
+    }
+  }
+
+  await prisma.moduleProgress.upsert({
+    where: {
+      studentProfileId_moduleId: {
+        studentProfileId: actor.studentProfile.id,
+        moduleId: quizModule.id
+      }
+    },
+    update: { marksObtained: score, completedAt: new Date() },
+    create: {
+      studentProfileId: actor.studentProfile.id,
+      moduleId: quizModule.id,
+      marksObtained: score,
+      completedAt: new Date()
+    }
+  });
+
+  return { score, maxScore: 10 };
+};
+
 export const getEventRegistrants = async (eventId, actor) => {
   const isAllowed =
     actor.role === "ADMIN" ||

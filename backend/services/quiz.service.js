@@ -114,9 +114,11 @@ export const submitQuizResult = async ({ email, eventId, courseId, eventTitle, f
   const PASSING_SCORE = event.course?.isCompulsory ? 4 : 3;
   const passed = score >= PASSING_SCORE;
 
-  // Find or auto-create the event module
+  // Find or auto-create the event module — excludes the module reserved for
+  // the new in-built quiz (sourceQuizId set) so a legacy Google-Form webhook
+  // submission can never land on / overwrite an in-built quiz's score.
   let eventModule = await prisma.eventModule.findFirst({
-    where: { eventId: resolvedEventId },
+    where: { eventId: resolvedEventId, sourceQuizId: null },
     orderBy: { startAt: "asc" }
   });
 

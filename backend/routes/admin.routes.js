@@ -25,9 +25,13 @@ import {
   getEventAnalyticsController,
   getWorkshopAnalyticsTableController,
   getCourseStaffController,
-  exportExcelController
+  exportExcelController,
+  getEventQuizController,
+  saveEventQuizController
 } from "../controllers/admin.controller.js";
 import { authenticate } from "../middleware/auth.js";
+import { validate } from "../middleware/validate.js";
+import { eventQuizSchema } from "../validators/quiz.validation.js";
 
 export const adminRoutes = Router();
 
@@ -51,6 +55,8 @@ adminRoutes.get("/events-with-registrations", authenticate, getAllEventsWithRegi
 adminRoutes.get("/events/:eventId/details", authenticate, getEventDetailsForAdminController); // New detailed route
 adminRoutes.get("/events/:eventId", authenticate, getEventDetailsController);
 adminRoutes.get("/events/:eventId/registrations", authenticate, getEventWithRegistrationsController);
+adminRoutes.get("/events/:eventId/quiz", authenticate, getEventQuizController);
+adminRoutes.put("/events/:eventId/quiz", authenticate, validate(eventQuizSchema), saveEventQuizController);
 
 // Staff Assignment
 adminRoutes.post("/assign-staff", authenticate, assignStaffController);

@@ -24,7 +24,9 @@ import {
   getEventAnalytics,
   getWorkshopAnalyticsTable,
   getCourseStaff,
-  generateExcelExport
+  generateExcelExport,
+  getEventQuiz,
+  upsertEventQuiz
 } from "../services/admin.service.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
@@ -410,6 +412,23 @@ export const createEventFromModuleController = asyncHandler(async (req, res) => 
 
   const event = await createEventFromModule(moduleId, req.body, req.user.id);
   res.status(StatusCodes.CREATED).json({ success: true, data: event });
+});
+
+// GET / SAVE IN-BUILT QUIZ FOR A STANDALONE EVENT
+export const getEventQuizController = asyncHandler(async (req, res) => {
+  if (req.user.role !== "ADMIN") {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Admin role required");
+  }
+  const quiz = await getEventQuiz(req.params.eventId);
+  res.status(StatusCodes.OK).json({ success: true, data: quiz });
+});
+
+export const saveEventQuizController = asyncHandler(async (req, res) => {
+  if (req.user.role !== "ADMIN") {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Admin role required");
+  }
+  const quiz = await upsertEventQuiz(req.params.eventId, req.validated.body.questions);
+  res.status(StatusCodes.OK).json({ success: true, message: "Quiz saved successfully", data: quiz });
 });
 
 // GET EVENT ANALYTICS
