@@ -182,7 +182,7 @@ export const autoRejectStaleCheckIns = async () => {
       status: "PENDING",
       event: { endAt: { lt: cutoff } }
     },
-    select: { id: true, userId: true, event: { select: { id: true, title: true } } }
+    select: { id: true, userId: true, moduleId: true, event: { select: { id: true, title: true } } }
   });
 
   if (!staleCheckIns.length) return;
@@ -191,6 +191,34 @@ export const autoRejectStaleCheckIns = async () => {
     where: { id: { in: staleCheckIns.map((c) => c.id) } },
     data: { status: "REJECTED", note: "Auto-rejected: not reviewed within 24 hours of session end" }
   });
+
+  // The notification below tells the student this was "marked absent" — that
+  // used to be a lie: this loop only ever touched EventCheckIn, never wrote
+  // an AttendanceRecord, so the student stayed NOT_MARKED in analytics
+  // forever instead of ABSENT. Write the record that was already being
+  // promised.
+  for (const checkIn of staleCheckIns) {
+    const existingAttendance = await prisma.attendanceRecord.findFirst({
+      where: { eventId: checkIn.event.id, userId: checkIn.userId, moduleId: checkIn.moduleId || null }
+    });
+    if (existingAttendance) {
+      await prisma.attendanceRecord.update({
+        where: { id: existingAttendance.id },
+        data: { status: "ABSENT", source: "AUTO_REJECT_STALE_CHECKIN", markedAt: new Date() }
+      });
+    } else {
+      await prisma.attendanceRecord.create({
+        data: {
+          eventId: checkIn.event.id,
+          moduleId: checkIn.moduleId,
+          userId: checkIn.userId,
+          status: "ABSENT",
+          source: "AUTO_REJECT_STALE_CHECKIN",
+          markedAt: new Date()
+        }
+      });
+    }
+  }
 
   for (const checkIn of staleCheckIns) {
     await createNotificationsForUsers(

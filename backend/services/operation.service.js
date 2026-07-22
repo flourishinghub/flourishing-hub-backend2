@@ -273,14 +273,31 @@ export const reviewCheckIn = async (checkInId, payload, actor) => {
   }
 
   if (payload.status === "REJECTED") {
-    // Revert AttendanceRecord back to ABSENT (was set to PRESENT on verify)
+    // Write a definitive ABSENT record. A check-in that was VERIFIED before
+    // already has an AttendanceRecord (set to PRESENT) that needs reverting;
+    // but a check-in rejected straight from PENDING has never had one
+    // created at all — findFirst-then-update-only left that case with no
+    // AttendanceRecord ever, so the student stayed silently NOT_MARKED
+    // instead of ABSENT.
     const existingAttendance = await prisma.attendanceRecord.findFirst({
-      where: { eventId: checkIn.eventId, userId: checkIn.userId }
+      where: { eventId: checkIn.eventId, userId: checkIn.userId, moduleId: checkIn.moduleId || null }
     });
     if (existingAttendance) {
       await prisma.attendanceRecord.update({
         where: { id: existingAttendance.id },
         data: { status: "ABSENT", markedById: actor.id, markedAt: new Date() }
+      });
+    } else {
+      await prisma.attendanceRecord.create({
+        data: {
+          eventId: checkIn.eventId,
+          moduleId: checkIn.moduleId,
+          userId: checkIn.userId,
+          status: "ABSENT",
+          source: "STAFF_REJECTED",
+          markedById: actor.id,
+          markedAt: new Date()
+        }
       });
     }
     // Revert EventRegistration back to REGISTERED
