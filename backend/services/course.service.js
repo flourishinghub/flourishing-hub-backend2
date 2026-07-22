@@ -117,7 +117,13 @@ export const cascadeBundleRegistrationForNewEvent = async (eventId) => {
     skipDuplicates: true
   });
 
-  notifyCourseBundleRegistration(newUserIds, event.courseId).catch(() => {});
+  // No notifyCourseBundleRegistration call here, deliberately: every user in
+  // newUserIds came from siblingRegistrations above, meaning they already
+  // hold a registration for another event in this bundle and were already
+  // sent the "enrolled in course bundle" email/notification when they first
+  // joined. Re-notifying them here was firing that same email once per new
+  // workshop added to an existing bundle (e.g. 3 emails for 3 workshops
+  // scheduled one after another) instead of once per student.
 };
 
 export const getCourseById = async (courseId) => {

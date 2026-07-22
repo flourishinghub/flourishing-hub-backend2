@@ -68,6 +68,23 @@ export const listUsers = async ({ role, search, department, programme, yearOfStu
 };
 
 export const updateUserRole = async (userId, role) => {
+  // STUDENT and VOLUNTEER dashboards hard-require a StudentProfile (see
+  // auth.service.js signup validation), but unlike InstructorProfile its
+  // required fields (rollNumber, department, yearOfStudy, programme) have
+  // no safe defaults, so we can't auto-create one here. A user demoted/moved
+  // into one of these roles without ever having a StudentProfile would
+  // otherwise end up in a broken state — role says STUDENT but every
+  // student endpoint 404s. Fail loudly here instead, before the role flips.
+  if (role === "STUDENT" || role === "VOLUNTEER") {
+    const existingStudentProfile = await prisma.studentProfile.findUnique({ where: { userId } });
+    if (!existingStudentProfile) {
+      throw new ApiError(
+        StatusCodes.BAD_REQUEST,
+        "This user has no student profile on record (roll number, department, year, programme). Add one before assigning this role."
+      );
+    }
+  }
+
   const user = await prisma.user.update({
     where: { id: userId },
     data: {
