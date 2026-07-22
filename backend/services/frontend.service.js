@@ -373,7 +373,11 @@ const buildStudentLikeProfile = async (userId, explicitRole) => {
     prisma.event.findMany({
       where: {
         status: "PUBLISHED",
-        startAt: {
+        // endAt (not startAt) >= now — a startAt-based cutoff drops an event
+        // the instant it starts, so a currently-live session (which is
+        // exactly what a "live now" card needs to find) could never appear
+        // here.
+        endAt: {
           gte: new Date()
         },
         ...studentVisibilityFilter
