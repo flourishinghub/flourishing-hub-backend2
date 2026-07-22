@@ -41,7 +41,9 @@ export const updateUserProfileSchema = z.object({
     employeeId: z.string().min(3).max(40).optional(),
     studentProfile: z
       .object({
-        rollNumber: z.string().min(3).max(30).optional(),
+        // Same email-instead-of-roll-number guard as the signup schema — see
+        // auth.validation.js for why this matters.
+        rollNumber: z.string().min(3).max(30).optional().refine((v) => v === undefined || !v.includes("@"), "Roll number looks like an email address — enter your actual roll number"),
         department: z.string().min(2).max(80).optional(),
         yearOfStudy: z.coerce.number().int().min(1).max(10).optional(),
         programme: z.enum(["BTECH", "MTECH", "PHD", "MSC", "MA", "OTHER"]).optional(),

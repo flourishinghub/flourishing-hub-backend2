@@ -18,7 +18,13 @@ export const registerSchema = z.object({
     profileImageUrl: z.string().url().optional(),
     studentProfile: z
       .object({
-        rollNumber: z.string().min(3).max(30),
+        // The signup form's roll-number field is free text with no format
+        // check — a student who fat-fingers their email address into it
+        // (instead of e.g. "25M0199") gets it silently accepted, and every
+        // roll-number-keyed lookup elsewhere (batch-upload matching, admin
+        // search) then fails to find them since the batch CSV has their real
+        // roll number, not their email.
+        rollNumber: z.string().min(3).max(30).refine((v) => !v.includes("@"), "Roll number looks like an email address — enter your actual roll number"),
         department: z.string().min(2).max(80),
         yearOfStudy: z.coerce.number().int().min(1).max(10),
         programme: z.enum(["BTECH", "MTECH", "PHD", "MSC", "MA", "DUAL_DEGREE", "OTHER"]),
