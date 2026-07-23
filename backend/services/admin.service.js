@@ -696,7 +696,7 @@ export const getWorkshopAnalyticsTable = async () => {
           user: {
             select: {
               id: true, name: true, email: true,
-              studentProfile: { select: { id: true, rollNumber: true, cohort: true } }
+              studentProfile: { select: { id: true, rollNumber: true, cohort: true, department: true, programme: true } }
             }
           }
         }
@@ -755,6 +755,8 @@ export const getWorkshopAnalyticsTable = async () => {
         // Prefer this event's own course+batch-scoped batch over the student's
         // flat StudentProfile.cohort — see getEventWithRegistrations for why.
         batch: event.batch || reg.user.studentProfile?.cohort || "—",
+        department: reg.user.studentProfile?.department || null,
+        programme: reg.user.studentProfile?.programme || null,
         attendanceStatus: attendanceMap[reg.userId] || "NOT_MARKED",
         quizCompleted: progress?.completed || false,
         score: progress?.marks ?? null,
@@ -778,7 +780,9 @@ export const getWorkshopAnalyticsTable = async () => {
       courseName: event.course?.name || "—",
       moduleName: event.courseModule?.title || "—",
       instructorName: instructor?.user?.name || "—",
+      instructorId: instructor?.user?.id || null,
       associateInstructorName: associateInstructor?.user?.name || "—",
+      associateInstructorId: associateInstructor?.user?.id || null,
       volunteerNames: volunteers.map(v => v.user.name),
       date: event.startAt,
       batch: event.batch || "—",
