@@ -691,6 +691,11 @@ export const getWorkshopAnalyticsTable = async () => {
         include: { user: { select: { id: true, name: true, role: true } } }
       },
       registrations: {
+        // Excludes CANCELLED so a student whose batch/module assignment was
+        // later corrected doesn't show a stale "ghost" row here alongside
+        // their real, active registration — see getEventAnalytics/getAllEventsWithRegistrations
+        // above for the same INACTIVE_REGISTRATION_STATUSES pattern.
+        where: { status: { not: "CANCELLED" } },
         select: {
           id: true, status: true, userId: true,
           user: {
