@@ -156,6 +156,7 @@ export const createCourse = async (data) => {
       instructorName: data.instructorName || null,
       status: data.status || "ACTIVE",
       isCompulsory: data.isCompulsory === true || data.isCompulsory === "true",
+      hasQuiz: data.hasQuiz === true || data.hasQuiz === "true",
       startDate: data.startDate ? new Date(data.startDate) : null,
       endDate: data.endDate ? new Date(data.endDate) : null,
       capacity: data.capacity,
@@ -179,6 +180,7 @@ export const updateCourse = async (courseId, data) => {
   if (data.instructorName !== undefined) updateData.instructorName = data.instructorName;
   if (data.status !== undefined) updateData.status = data.status;
   if (data.isCompulsory !== undefined) updateData.isCompulsory = data.isCompulsory === true || data.isCompulsory === "true";
+  if (data.hasQuiz !== undefined) updateData.hasQuiz = data.hasQuiz === true || data.hasQuiz === "true";
   if (data.startDate !== undefined) updateData.startDate = data.startDate ? new Date(data.startDate) : null;
   if (data.endDate !== undefined) updateData.endDate = data.endDate ? new Date(data.endDate) : null;
   if (data.capacity !== undefined) updateData.capacity = data.capacity;

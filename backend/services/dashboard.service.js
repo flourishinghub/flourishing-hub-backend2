@@ -805,9 +805,33 @@ export const getStudentBundleProgress = async (userId) => {
         const scheduledTitles = new Set(
           myWorkshops.map((e) => (e.title || "").trim().toLowerCase()).filter(Boolean)
         );
+        // The student's own batch, read off one of their already-registered
+        // events (not re-derived/guessed) — used only to enrich a pending
+        // module with its real scheduled date/venue when one exists, never
+        // to change which modules count as "pending" (that logic above is
+        // registration-based and intentionally left alone, see its comment).
+        const myBatch = myWorkshops.find((e) => e.batch)?.batch || null;
+        const batchEventByModuleId = myBatch
+          ? new Map(
+              course.events
+                .filter((e) => e.courseModuleId && e.batch?.toLowerCase() === myBatch.toLowerCase())
+                .map((e) => [e.courseModuleId, e])
+            )
+          : new Map();
+
         pendingWorkshops = course.modules
           .filter((m) => !scheduledModuleIds.has(m.id) && !scheduledTitles.has((m.title || "").trim().toLowerCase()))
-          .map((m) => ({ id: m.id, title: m.title }));
+          .map((m) => {
+            const scheduledEvent = batchEventByModuleId.get(m.id);
+            // A student isn't registered for this module yet, but an Event
+            // already exists for their own batch — surface it as an actual
+            // upcoming workshop (with its real date) instead of a bare
+            // "Pending Schedule" placeholder, so registering-for-≥1-workshop
+            // is enough to see the rest of the bundle as it gets scheduled.
+            return scheduledEvent
+              ? { id: m.id, title: m.title, eventId: scheduledEvent.id, startAt: scheduledEvent.startAt, scheduled: true }
+              : { id: m.id, title: m.title, scheduled: false };
+          });
       }
 
       const total = myWorkshops.length + pendingWorkshops.length;

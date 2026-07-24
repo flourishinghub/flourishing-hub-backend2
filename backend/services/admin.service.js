@@ -685,7 +685,7 @@ export const getWorkshopAnalyticsTable = async () => {
       ]
     },
     include: {
-      course: { select: { id: true, name: true } },
+      course: { select: { id: true, name: true, hasQuiz: true } },
       courseModule: { select: { id: true, title: true } },
       assignments: {
         include: { user: { select: { id: true, name: true, role: true } } }
@@ -714,6 +714,7 @@ export const getWorkshopAnalyticsTable = async () => {
         select: {
           id: true,
           maxMarks: true,
+          sourceQuizId: true,
           progressEntries: {
             select: { studentProfileId: true, marksObtained: true, completedAt: true }
           }
@@ -748,6 +749,20 @@ export const getWorkshopAnalyticsTable = async () => {
       });
     });
 
+    // In-built quiz score, kept separate from the general score/maxScore sum
+    // above — this is specifically the auto-created module holding the new
+    // 10-question in-built quiz's submission (sourceQuizId set), never the
+    // legacy Google-Form webhook's module or a template/bulk-import module.
+    // Always out of 10 by construction (see QUIZ_QUESTION_COUNT), so a raw
+    // score comparison against the pass threshold needs no scaling.
+    const quizModule = event.modules.find(m => m.sourceQuizId != null);
+    const quizScoreMap = {};
+    if (quizModule) {
+      quizModule.progressEntries.forEach(p => {
+        if (p.marksObtained != null) quizScoreMap[p.studentProfileId] = p.marksObtained;
+      });
+    }
+
     // Per-student list with all required fields
     const students = event.registrations.map(reg => {
       const spId = reg.user.studentProfile?.id;
@@ -766,6 +781,7 @@ export const getWorkshopAnalyticsTable = async () => {
         quizCompleted: progress?.completed || false,
         score: progress?.marks ?? null,
         maxScore: progress?.maxMarks ?? null,
+        quizScore: spId ? (quizScoreMap[spId] ?? null) : null,
         rating: feedbackMap[reg.userId] || null,
         registrationStatus: reg.status
       };
@@ -783,6 +799,7 @@ export const getWorkshopAnalyticsTable = async () => {
       id: event.id,
       workshopName: event.title,
       courseName: event.course?.name || "—",
+      courseHasQuiz: event.course?.hasQuiz ?? false,
       moduleName: event.courseModule?.title || "—",
       instructorName: instructor?.user?.name || "—",
       instructorId: instructor?.user?.id || null,

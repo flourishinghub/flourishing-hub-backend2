@@ -471,6 +471,11 @@ model Course {
   instructorName     String?
   status             CourseStatus  @default(ACTIVE)
   isCompulsory       Boolean       @default(false)
+  // Whether the in-built MCQ quiz (always 10 questions, distinct from the
+  // legacy Google-Form quiz.service.js webhook) is meant to be used for this
+  // course's modules — drives Pass/Fail grading in admin Analytics. Separate
+  // from isCompulsory: compulsory bundle courses don't all have a quiz.
+  hasQuiz            Boolean       @default(false)
   startDate          DateTime?
   endDate            DateTime?
   capacity           Int?
