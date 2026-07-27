@@ -232,6 +232,10 @@ model Event {
   courseId              String?
   courseModuleId        String?
   batch                 String?
+  // Direct link to a reusable Quiz-library quiz (see Quiz model below) — only
+  // meaningful for a standalone event with no courseModuleId, since a
+  // course-linked event always inherits its quiz from courseModule.quizId.
+  quizId                String?
   completionEmailSentAt DateTime?
   reminder24hSentAt     DateTime?
   reminder1hSentAt      DateTime?
@@ -241,6 +245,7 @@ model Event {
   template              EventTemplate?         @relation(fields: [templateId], references: [id])
   course                Course?                @relation("EventCourse", fields: [courseId], references: [id], onDelete: SetNull)
   courseModule          CourseModule?          @relation("EventFromModule", fields: [courseModuleId], references: [id], onDelete: SetNull)
+  quiz                  Quiz?                  @relation(fields: [quizId], references: [id], onDelete: SetNull)
   modules               EventModule[]
   registrations         EventRegistration[]
   assignments           EventStaffAssignment[]
@@ -248,12 +253,12 @@ model Event {
   checkIns              EventCheckIn[]
   attendances           AttendanceRecord[]
   feedbackEntries       Feedback[]
-  quiz                  Quiz?
 
   @@index([status, startAt])
   @@index([type, startAt])
   @@index([courseId])
   @@index([courseModuleId])
+  @@index([quizId])
 }
 
 model EventModule {
@@ -502,33 +507,40 @@ model CourseModule {
   duration        String?
   order           Int       @default(0)
   isActive        Boolean   @default(true)
+  // Link into the reusable Quiz library (see Quiz model below) — nullable so
+  // a module can be created and scheduled before quiz content is ready, and
+  // attached later. Every per-batch Event instantiated from this module
+  // (sharing this courseModuleId) resolves to the SAME quiz via this field.
+  quizId          String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
   course          Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
   events          Event[]   @relation("EventFromModule")
   batchAssignments BatchAssignment[]
-  quiz            Quiz?
+  quiz            Quiz?     @relation(fields: [quizId], references: [id], onDelete: SetNull)
 
   @@index([courseId, order])
   @@index([isActive])
+  @@index([quizId])
 }
 
-// A fixed 10-question MCQ quiz authored once, either on a reusable
-// CourseModule (shared by every per-batch Event instantiated from it) or
-// directly on a standalone Event that has no course/module (an open
-// workshop). Exactly one of courseModuleId/eventId is set — enforced in the
-// service layer, not the DB (Prisma can't express XOR on nullable uniques).
+// A reusable, fixed 10-question MCQ quiz — created independently in the admin
+// "Forms" library and then LINKED (by reference, not copy) to any number of
+// CourseModules and/or standalone Events via their quizId field. Editing a
+// quiz's questions here updates it everywhere it's linked. Deleting a quiz
+// that's still linked anywhere is blocked in the service layer (see
+// quizLibrary.service.js) — onDelete: SetNull below is just a DB-level
+// backstop, not the primary safeguard.
 model Quiz {
   id             String   @id @default(cuid())
-  courseModuleId String?  @unique
-  eventId        String?  @unique
+  title          String
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  courseModule CourseModule?  @relation(fields: [courseModuleId], references: [id], onDelete: Cascade)
-  event        Event?         @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  questions    QuizQuestion[]
+  questions     QuizQuestion[]
+  courseModules CourseModule[]
+  events        Event[]
 }
 
 model QuizQuestion {

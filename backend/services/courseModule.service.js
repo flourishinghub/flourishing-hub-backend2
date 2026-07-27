@@ -83,60 +83,40 @@ export const deleteModule = async (id) => {
   return { message: "Module deleted successfully" };
 };
 
-const QUIZ_QUESTION_COUNT = 10;
-
-// Fixed-10-question in-built quiz, authored once on the CourseModule so
-// every per-batch Event instantiated from it (bulk import creates one Event
-// PER BATCH sharing this courseModuleId) resolves to the same questions
-// instead of the admin re-entering them per event.
+// In-built quiz — now a reusable Quiz-library entity (see quizLibrary.service.js
+// for create/edit/delete of the quiz itself). A CourseModule just holds a
+// reference (quizId) to one; every per-batch Event instantiated from this
+// module (bulk import creates one Event PER BATCH sharing this
+// courseModuleId) resolves to the same questions via that shared reference.
 export const getModuleQuiz = async (moduleId) => {
-  const module = await prisma.courseModule.findUnique({ where: { id: moduleId } });
+  const module = await prisma.courseModule.findUnique({
+    where: { id: moduleId },
+    include: { quiz: { include: { questions: { orderBy: { order: "asc" } } } } }
+  });
   if (!module) {
     throw new ApiError(StatusCodes.NOT_FOUND, "Module not found");
   }
 
-  const quiz = await prisma.quiz.findUnique({
-    where: { courseModuleId: moduleId },
-    include: { questions: { orderBy: { order: "asc" } } }
-  });
-
-  return quiz || { courseModuleId: moduleId, questions: [] };
+  return module.quiz || { quizId: null, questions: [] };
 };
 
-export const upsertModuleQuiz = async (moduleId, questions) => {
+// Links (or unlinks, when quizId is null) this module to a quiz from the
+// Forms library. No question editing happens here anymore — that's
+// quizLibrary.service.js's job, and edits there apply everywhere the quiz is
+// linked.
+export const linkModuleQuiz = async (moduleId, quizId) => {
   const module = await prisma.courseModule.findUnique({ where: { id: moduleId } });
   if (!module) {
     throw new ApiError(StatusCodes.NOT_FOUND, "Module not found");
   }
-  if (!Array.isArray(questions) || questions.length !== QUIZ_QUESTION_COUNT) {
-    throw new ApiError(StatusCodes.BAD_REQUEST, `Quiz must have exactly ${QUIZ_QUESTION_COUNT} questions`);
+  if (quizId) {
+    const quiz = await prisma.quiz.findUnique({ where: { id: quizId } });
+    if (!quiz) {
+      throw new ApiError(StatusCodes.NOT_FOUND, "Quiz not found");
+    }
   }
 
-  const quiz = await prisma.quiz.upsert({
-    where: { courseModuleId: moduleId },
-    update: {},
-    create: { courseModuleId: moduleId }
-  });
-
-  // Full-replace semantics: simplest correct behavior for a fixed-10-slot
-  // editor where the admin edits the whole set at once. Wrapped in a
-  // transaction so a mid-replace failure can't leave a partial quiz live.
-  await prisma.$transaction([
-    prisma.quizQuestion.deleteMany({ where: { quizId: quiz.id } }),
-    prisma.quizQuestion.createMany({
-      data: questions.map((q, index) => ({
-        quizId: quiz.id,
-        order: index,
-        questionText: q.questionText,
-        optionA: q.optionA,
-        optionB: q.optionB,
-        optionC: q.optionC,
-        optionD: q.optionD,
-        correctOption: q.correctOption
-      }))
-    })
-  ]);
-
+  await prisma.courseModule.update({ where: { id: moduleId }, data: { quizId: quizId || null } });
   return getModuleQuiz(moduleId);
 };
 

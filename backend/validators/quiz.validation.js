@@ -11,12 +11,14 @@ const quizQuestionInput = z.object({
   correctOption: optionEnum
 });
 
-const questionsBody = z.object({
-  questions: z.array(quizQuestionInput).length(10)
+// A module/event now just LINKS to a Quiz-library quiz by id (or clears the
+// link with null) — question authoring lives in quizLibrarySchema below.
+const linkQuizBody = z.object({
+  quizId: z.string().min(5).nullable()
 });
 
 export const moduleQuizSchema = z.object({
-  body: questionsBody,
+  body: linkQuizBody,
   params: z.object({
     courseId: z.string().min(5),
     id: z.string().min(5)
@@ -25,9 +27,29 @@ export const moduleQuizSchema = z.object({
 });
 
 export const eventQuizSchema = z.object({
-  body: questionsBody,
+  body: linkQuizBody,
   params: z.object({
     eventId: z.string().min(5)
+  }),
+  query: z.object({}).optional()
+});
+
+export const createQuizLibrarySchema = z.object({
+  body: z.object({
+    title: z.string().min(1).max(200),
+    questions: z.array(quizQuestionInput).length(10).optional()
+  }),
+  params: z.object({}).optional(),
+  query: z.object({}).optional()
+});
+
+export const updateQuizLibrarySchema = z.object({
+  body: z.object({
+    title: z.string().min(1).max(200),
+    questions: z.array(quizQuestionInput).length(10)
+  }),
+  params: z.object({
+    id: z.string().min(5)
   }),
   query: z.object({}).optional()
 });

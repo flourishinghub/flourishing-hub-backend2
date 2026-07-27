@@ -26,7 +26,7 @@ import {
   getCourseStaff,
   generateExcelExport,
   getEventQuiz,
-  upsertEventQuiz
+  linkEventQuiz
 } from "../services/admin.service.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
@@ -427,8 +427,8 @@ export const saveEventQuizController = asyncHandler(async (req, res) => {
   if (req.user.role !== "ADMIN") {
     throw new ApiError(StatusCodes.FORBIDDEN, "Admin role required");
   }
-  const quiz = await upsertEventQuiz(req.params.eventId, req.validated.body.questions);
-  res.status(StatusCodes.OK).json({ success: true, message: "Quiz saved successfully", data: quiz });
+  const quiz = await linkEventQuiz(req.params.eventId, req.validated.body.quizId);
+  res.status(StatusCodes.OK).json({ success: true, message: "Quiz link updated successfully", data: quiz });
 });
 
 // GET EVENT ANALYTICS

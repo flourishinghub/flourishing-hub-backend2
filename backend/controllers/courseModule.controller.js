@@ -68,8 +68,8 @@ export const getModuleQuiz = asyncHandler(async (req, res) => {
 
 export const saveModuleQuiz = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const quiz = await courseModuleService.upsertModuleQuiz(id, req.validated.body.questions);
-  res.status(StatusCodes.OK).json({ success: true, message: "Quiz saved successfully", data: quiz });
+  const quiz = await courseModuleService.linkModuleQuiz(id, req.validated.body.quizId);
+  res.status(StatusCodes.OK).json({ success: true, message: "Quiz link updated successfully", data: quiz });
 });
 
 export const getModuleUsage = async (req, res, next) => {

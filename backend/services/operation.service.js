@@ -562,15 +562,20 @@ export const getMyEventProgress = async (eventId, actor) => {
 const resolveEventQuiz = async (eventId) => {
   const event = await prisma.event.findUnique({
     where: { id: eventId },
-    select: { id: true, title: true, startAt: true, endAt: true, courseModuleId: true }
+    select: {
+      id: true, title: true, startAt: true, endAt: true, courseModuleId: true, quizId: true,
+      courseModule: { select: { quizId: true } }
+    }
   });
   if (!event) {
     throw new ApiError(StatusCodes.NOT_FOUND, "Event not found");
   }
 
-  const quiz = event.courseModuleId
-    ? await prisma.quiz.findUnique({ where: { courseModuleId: event.courseModuleId } })
-    : await prisma.quiz.findUnique({ where: { eventId: event.id } });
+  // Course-linked event inherits its module's quiz (shared by every
+  // per-batch Event instantiated from that module); a standalone event uses
+  // its own direct link.
+  const resolvedQuizId = event.courseModuleId ? event.courseModule?.quizId : event.quizId;
+  const quiz = resolvedQuizId ? await prisma.quiz.findUnique({ where: { id: resolvedQuizId } }) : null;
 
   return { event, quiz };
 };

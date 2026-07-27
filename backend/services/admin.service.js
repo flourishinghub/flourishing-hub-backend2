@@ -546,26 +546,26 @@ export const createEventFromModule = async (moduleId, eventData, createdById) =>
   });
 };
 
-const QUIZ_QUESTION_COUNT = 10;
-
-// In-built quiz authored directly on a standalone/open-workshop Event (no
-// course/module to hang it off). Course-linked events instead inherit their
-// quiz from event.courseModule — see services/courseModule.service.js.
+// In-built quiz — a reusable Quiz-library entity (see quizLibrary.service.js
+// for create/edit/delete of the quiz itself). A standalone/open-workshop
+// Event (no course/module to hang it off) just holds a reference (quizId) to
+// one. Course-linked events instead inherit their quiz from
+// event.courseModule.quizId — see services/courseModule.service.js.
 export const getEventQuiz = async (eventId) => {
-  const event = await prisma.event.findUnique({ where: { id: eventId } });
+  const event = await prisma.event.findUnique({
+    where: { id: eventId },
+    include: { quiz: { include: { questions: { orderBy: { order: "asc" } } } } }
+  });
   if (!event) {
     throw new ApiError(StatusCodes.NOT_FOUND, "Event not found");
   }
 
-  const quiz = await prisma.quiz.findUnique({
-    where: { eventId },
-    include: { questions: { orderBy: { order: "asc" } } }
-  });
-
-  return quiz || { eventId, questions: [] };
+  return event.quiz || { quizId: null, questions: [] };
 };
 
-export const upsertEventQuiz = async (eventId, questions) => {
+// Links (or unlinks, when quizId is null) this standalone event to a quiz
+// from the Forms library.
+export const linkEventQuiz = async (eventId, quizId) => {
   const event = await prisma.event.findUnique({ where: { id: eventId } });
   if (!event) {
     throw new ApiError(StatusCodes.NOT_FOUND, "Event not found");
@@ -576,32 +576,14 @@ export const upsertEventQuiz = async (eventId, questions) => {
       "This event's quiz is inherited from its course module — edit the module's quiz instead"
     );
   }
-  if (!Array.isArray(questions) || questions.length !== QUIZ_QUESTION_COUNT) {
-    throw new ApiError(StatusCodes.BAD_REQUEST, `Quiz must have exactly ${QUIZ_QUESTION_COUNT} questions`);
+  if (quizId) {
+    const quiz = await prisma.quiz.findUnique({ where: { id: quizId } });
+    if (!quiz) {
+      throw new ApiError(StatusCodes.NOT_FOUND, "Quiz not found");
+    }
   }
 
-  const quiz = await prisma.quiz.upsert({
-    where: { eventId },
-    update: {},
-    create: { eventId }
-  });
-
-  await prisma.$transaction([
-    prisma.quizQuestion.deleteMany({ where: { quizId: quiz.id } }),
-    prisma.quizQuestion.createMany({
-      data: questions.map((q, index) => ({
-        quizId: quiz.id,
-        order: index,
-        questionText: q.questionText,
-        optionA: q.optionA,
-        optionB: q.optionB,
-        optionC: q.optionC,
-        optionD: q.optionD,
-        correctOption: q.correctOption
-      }))
-    })
-  ]);
-
+  await prisma.event.update({ where: { id: eventId }, data: { quizId: quizId || null } });
   return getEventQuiz(eventId);
 };
 
@@ -807,6 +789,7 @@ export const getWorkshopAnalyticsTable = async () => {
       associateInstructorId: associateInstructor?.user?.id || null,
       volunteerNames: volunteers.map(v => v.user.name),
       date: event.startAt,
+      endAt: event.endAt,
       batch: event.batch || "—",
       venue: event.venue || "—",
       totalRegistered: event.registrations.length,
