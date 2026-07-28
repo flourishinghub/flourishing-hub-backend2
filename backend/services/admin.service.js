@@ -677,7 +677,13 @@ export const getWorkshopAnalyticsTable = async () => {
         // later corrected doesn't show a stale "ghost" row here alongside
         // their real, active registration — see getEventAnalytics/getAllEventsWithRegistrations
         // above for the same INACTIVE_REGISTRATION_STATUSES pattern.
-        where: { status: { not: "CANCELLED" } },
+        // Also excludes deactivated users — a duplicate-account cleanup marks
+        // the losing side isActive: false and rewrites its rollNumber to
+        // "MERGED-<userId>" (to free the real roll number for the kept
+        // account) rather than deleting it outright, so its history stays
+        // auditable. Without this filter, that placeholder roll number
+        // leaked straight into the Student Roster as a garbage-looking row.
+        where: { status: { not: "CANCELLED" }, user: { isActive: true } },
         select: {
           id: true, status: true, userId: true,
           user: {
@@ -881,7 +887,14 @@ export const generateExcelExport = async () => {
         course: { select: { id: true, name: true, code: true, isCompulsory: true } },
         courseModule: { select: { id: true, title: true } },
         assignments: { include: { user: { select: { id: true, name: true, role: true, instructorProfile: { select: { department: true } } } } } },
+        // Same two exclusions as getWorkshopAnalyticsTable above: CANCELLED
+        // so a corrected batch/module assignment doesn't leave a stale ghost
+        // row alongside the real one, and isActive so a deactivated
+        // duplicate-account cleanup (rollNumber rewritten to "MERGED-…" to
+        // free it for the kept account) doesn't leak that placeholder into
+        // the export.
         registrations: {
+          where: { status: { not: "CANCELLED" }, user: { isActive: true } },
           include: {
             user: {
               select: {
@@ -1343,7 +1356,14 @@ export const getEventDetailsForAdmin = async (eventId) => {
   const event = await prisma.event.findUnique({
     where: { id: eventId },
     include: {
+      // Excludes CANCELLED (a corrected batch/module reassignment's stale old
+      // registration) and deactivated users (a merged duplicate account,
+      // rollNumber rewritten to "MERGED-…") — same ghost-row leak as
+      // getWorkshopAnalyticsTable above. WAITLISTED/NO_SHOW stay visible
+      // here (unlike the analytics roster) since the admin managing this
+      // specific event's registrations needs to see and act on those.
       registrations: {
+        where: { status: { not: "CANCELLED" }, user: { isActive: true } },
         include: {
           user: {
             include: {

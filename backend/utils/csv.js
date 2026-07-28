@@ -18,7 +18,14 @@ export const toCsv = (rows) => {
     ...rows.map((row) => headers.map((header) => escapeCell(row[header])).join(","))
   ];
 
-  return lines.join("\n");
+  // Excel (Windows) ignores the "Content-Type: text/csv; charset=utf-8"
+  // response header when a downloaded CSV is opened by double-click —
+  // without a UTF-8 byte-order-mark at the very start of the file, it falls
+  // back to the system codepage (Windows-1252), turning any non-ASCII
+  // character (e.g. a name with a diacritic, or an em dash) into mojibake
+  // like "â€"". The BOM is what tells Excel specifically to decode the rest
+  // of the file as UTF-8 — most other tools ignore it or already assume UTF-8.
+  return "﻿" + lines.join("\n");
 };
 
 export const parseCsv = (content) => {

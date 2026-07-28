@@ -608,6 +608,36 @@ const importUsers = async (rows, meta) => {
       }
     });
 
+    // StudentProfile.rollNumber is @unique, but that's a case-SENSITIVE
+    // Postgres constraint while every lookup elsewhere in the app (batch
+    // matching, admin search, self-signup's own duplicate check in
+    // auth.service.js) treats roll numbers case-insensitively. Matching
+    // existingUser by email ONLY (above) misses the case where the SAME
+    // physical student already has an account under a DIFFERENT email (e.g.
+    // they self-registered with a personal Gmail as "25m1220", and this
+    // import row is their official IITB roster entry as "25M1220@iitb.ac.in")
+    // — that row would otherwise sail through as a brand-new user, since
+    // "25m1220" and "25M1220" are different strings to the DB's unique
+    // index, silently creating a second account (and a "MERGED-…" cleanup
+    // headache later) for one real student instead of updating the one that
+    // already exists. Block it here and surface it as a normal per-row
+    // import error instead, so the admin resolves it explicitly.
+    if (!existingUser && (role === "STUDENT" || role === "VOLUNTEER") && row.rollNumber) {
+      const rollToCheck = normalizeString(row.rollNumber);
+      const existingByRoll = rollToCheck
+        ? await prisma.studentProfile.findFirst({
+            where: { rollNumber: { equals: rollToCheck, mode: "insensitive" } },
+            include: { user: { select: { email: true } } }
+          })
+        : null;
+      if (existingByRoll) {
+        throw new ApiError(
+          StatusCodes.CONFLICT,
+          `Roll number "${rollToCheck}" is already registered under a different email (${existingByRoll.user.email}) — resolve this manually instead of creating a duplicate account.`
+        );
+      }
+    }
+
     const password = normalizeString(row.password) || defaultPassword;
     const passwordHash = await bcrypt.hash(password, 10);
     const employeeId = normalizeString(row.employeeId);
