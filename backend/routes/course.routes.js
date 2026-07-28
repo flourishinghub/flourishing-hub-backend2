@@ -5,6 +5,7 @@ import { authenticate } from "../middleware/auth.js";
 import { authorize } from "../middleware/authorize.js";
 import { validate } from "../middleware/validate.js";
 import { moduleQuizSchema } from "../validators/quiz.validation.js";
+import { moduleFeedbackFormSchema } from "../validators/feedback.validation.js";
 import { bulkEnrollToCourse, selfEnrollToCourse } from "../controllers/course.controller.js";
 
 const router = express.Router();
@@ -31,6 +32,13 @@ router.put(
   authorize("ADMIN"),
   validate(moduleQuizSchema),
   courseModuleController.saveModuleQuiz
+);
+router.get("/:courseId/modules/:id/feedback", courseModuleController.getModuleFeedbackForm);
+router.put(
+  "/:courseId/modules/:id/feedback",
+  authorize("ADMIN"),
+  validate(moduleFeedbackFormSchema),
+  courseModuleController.saveModuleFeedbackForm
 );
 router.get("/:courseId/modules/:id", courseModuleController.getModule);
 router.put("/:courseId/modules/:id", authorize("ADMIN"), courseModuleController.updateModule);

@@ -19,6 +19,8 @@ export const createModule = async (courseId, data) => {
       duration: data.duration,
       order: data.order ?? 0,
       isActive: data.isActive ?? true,
+      quizApplicable: data.quizApplicable ?? false,
+      feedbackApplicable: data.feedbackApplicable ?? false,
     },
   });
 };
@@ -67,6 +69,8 @@ export const updateModule = async (id, data) => {
   if (data.duration !== undefined) updateData.duration = data.duration;
   if (data.order !== undefined) updateData.order = data.order;
   if (data.isActive !== undefined) updateData.isActive = data.isActive;
+  if (data.quizApplicable !== undefined) updateData.quizApplicable = data.quizApplicable;
+  if (data.feedbackApplicable !== undefined) updateData.feedbackApplicable = data.feedbackApplicable;
 
   return prisma.courseModule.update({ where: { id }, data: updateData });
 };
@@ -118,6 +122,36 @@ export const linkModuleQuiz = async (moduleId, quizId) => {
 
   await prisma.courseModule.update({ where: { id: moduleId }, data: { quizId: quizId || null } });
   return getModuleQuiz(moduleId);
+};
+
+// Same reference-linking pattern as the quiz pair above, for the Feedback
+// library (see feedbackLibrary.service.js).
+export const getModuleFeedbackForm = async (moduleId) => {
+  const module = await prisma.courseModule.findUnique({
+    where: { id: moduleId },
+    include: { feedbackForm: { include: { questions: { orderBy: { order: "asc" } } } } }
+  });
+  if (!module) {
+    throw new ApiError(StatusCodes.NOT_FOUND, "Module not found");
+  }
+
+  return module.feedbackForm || { feedbackFormId: null, questions: [] };
+};
+
+export const linkModuleFeedback = async (moduleId, feedbackFormId) => {
+  const module = await prisma.courseModule.findUnique({ where: { id: moduleId } });
+  if (!module) {
+    throw new ApiError(StatusCodes.NOT_FOUND, "Module not found");
+  }
+  if (feedbackFormId) {
+    const form = await prisma.feedbackForm.findUnique({ where: { id: feedbackFormId } });
+    if (!form) {
+      throw new ApiError(StatusCodes.NOT_FOUND, "Feedback form not found");
+    }
+  }
+
+  await prisma.courseModule.update({ where: { id: moduleId }, data: { feedbackFormId: feedbackFormId || null } });
+  return getModuleFeedbackForm(moduleId);
 };
 
 export const getModuleUsageStats = async (id) => {

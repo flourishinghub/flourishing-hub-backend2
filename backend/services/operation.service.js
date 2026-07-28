@@ -717,6 +717,129 @@ export const submitMyQuiz = async (eventId, payload, actor) => {
   return { score, maxScore: 10 };
 };
 
+// Same inherit-from-module-else-use-own-field resolution as resolveEventQuiz
+// above, for the Feedback library.
+const resolveEventFeedbackForm = async (eventId) => {
+  const event = await prisma.event.findUnique({
+    where: { id: eventId },
+    select: {
+      id: true, title: true, courseModuleId: true, feedbackFormId: true,
+      courseModule: { select: { feedbackFormId: true } }
+    }
+  });
+  if (!event) {
+    throw new ApiError(StatusCodes.NOT_FOUND, "Event not found");
+  }
+
+  const resolvedFormId = event.courseModuleId ? event.courseModule?.feedbackFormId : event.feedbackFormId;
+  const form = resolvedFormId ? await prisma.feedbackForm.findUnique({ where: { id: resolvedFormId } }) : null;
+
+  return { event, form };
+};
+
+export const getMyFeedbackForm = async (eventId, actor) => {
+  const { form } = await resolveEventFeedbackForm(eventId);
+  if (!form) {
+    return { available: false };
+  }
+  if (!actor.studentProfile) {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Only students can submit this feedback form");
+  }
+
+  const verified = await isAttendanceVerified(eventId, actor.id);
+  if (!verified) {
+    return { available: true, locked: true };
+  }
+
+  const response = await prisma.feedbackResponse.findUnique({
+    where: { eventId_userId: { eventId, userId: actor.id } },
+    include: { answers: true }
+  });
+
+  if (response) {
+    return {
+      available: true,
+      locked: false,
+      alreadySubmitted: true,
+      answers: response.answers.map((a) => ({
+        questionId: a.feedbackQuestionId,
+        answerText: a.answerText ?? undefined,
+        answerRating: a.answerRating ?? undefined
+      }))
+    };
+  }
+
+  const questions = await prisma.feedbackQuestion.findMany({
+    where: { feedbackFormId: form.id },
+    orderBy: { order: "asc" }
+  });
+
+  return { available: true, locked: false, alreadySubmitted: false, questions };
+};
+
+export const submitMyFeedbackForm = async (eventId, payload, actor) => {
+  const { form } = await resolveEventFeedbackForm(eventId);
+  if (!form) {
+    throw new ApiError(StatusCodes.NOT_FOUND, "No feedback form is configured for this event");
+  }
+  if (!actor.studentProfile) {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Only students can submit this feedback form");
+  }
+
+  const verified = await isAttendanceVerified(eventId, actor.id);
+  if (!verified) {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Attendance must be verified before submitting feedback");
+  }
+
+  const existing = await prisma.feedbackResponse.findUnique({
+    where: { eventId_userId: { eventId, userId: actor.id } }
+  });
+  if (existing) {
+    throw new ApiError(StatusCodes.CONFLICT, "You have already submitted this feedback");
+  }
+
+  const questions = await prisma.feedbackQuestion.findMany({ where: { feedbackFormId: form.id } });
+  const questionById = new Map(questions.map((q) => [q.id, q]));
+  const answerByQuestionId = new Map(payload.answers.map((a) => [a.questionId, a]));
+
+  for (const question of questions) {
+    const answer = answerByQuestionId.get(question.id);
+    if (!answer) {
+      throw new ApiError(StatusCodes.BAD_REQUEST, `Missing answer for question "${question.questionText}"`);
+    }
+    if (question.type === "RATING" && answer.answerRating === undefined) {
+      throw new ApiError(StatusCodes.BAD_REQUEST, `"${question.questionText}" requires a 1-5 rating`);
+    }
+    if (question.type !== "RATING" && !answer.answerText) {
+      throw new ApiError(StatusCodes.BAD_REQUEST, `"${question.questionText}" requires an answer`);
+    }
+    if (question.type === "MCQ" && !["A", "B", "C", "D"].includes(answer.answerText)) {
+      throw new ApiError(StatusCodes.BAD_REQUEST, `"${question.questionText}" requires a valid option`);
+    }
+  }
+
+  await prisma.feedbackResponse.create({
+    data: {
+      feedbackFormId: form.id,
+      eventId,
+      userId: actor.id,
+      answers: {
+        createMany: {
+          data: payload.answers
+            .filter((a) => questionById.has(a.questionId))
+            .map((a) => ({
+              feedbackQuestionId: a.questionId,
+              answerText: a.answerText ?? null,
+              answerRating: a.answerRating ?? null
+            }))
+        }
+      }
+    }
+  });
+
+  return { submitted: true };
+};
+
 export const getEventRegistrants = async (eventId, actor) => {
   const isAllowed =
     actor.role === "ADMIN" ||

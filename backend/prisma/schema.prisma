@@ -135,6 +135,7 @@ model User {
   checkIns           EventCheckIn[]     @relation("CheckInByUser")
   verifiedCheckIns   EventCheckIn[]     @relation("CheckInVerifiedBy")
   feedbackEntries    Feedback[]
+  feedbackResponses  FeedbackResponse[]
   importJobs         ImportJob[]        @relation("ImportCreatedBy")
   emailVerifications EmailVerification[]
   notifications      Notification[]
@@ -236,6 +237,15 @@ model Event {
   // meaningful for a standalone event with no courseModuleId, since a
   // course-linked event always inherits its quiz from courseModule.quizId.
   quizId                String?
+  // Whether the linked quiz/feedback form is actually required of students —
+  // decoupled from quizId/feedbackFormId being set so an admin can flip a
+  // toggle on before content is ready. Only meaningful for a standalone event
+  // (no courseModuleId); course-linked events inherit both from their module.
+  quizApplicable        Boolean                @default(false)
+  feedbackApplicable    Boolean                @default(false)
+  // Direct link to a reusable Feedback-library form (see FeedbackForm model
+  // below) — same standalone-only/inherit-from-module rule as quizId.
+  feedbackFormId        String?
   completionEmailSentAt DateTime?
   reminder24hSentAt     DateTime?
   reminder1hSentAt      DateTime?
@@ -246,6 +256,7 @@ model Event {
   course                Course?                @relation("EventCourse", fields: [courseId], references: [id], onDelete: SetNull)
   courseModule          CourseModule?          @relation("EventFromModule", fields: [courseModuleId], references: [id], onDelete: SetNull)
   quiz                  Quiz?                  @relation(fields: [quizId], references: [id], onDelete: SetNull)
+  feedbackForm          FeedbackForm?          @relation(fields: [feedbackFormId], references: [id], onDelete: SetNull)
   modules               EventModule[]
   registrations         EventRegistration[]
   assignments           EventStaffAssignment[]
@@ -253,12 +264,14 @@ model Event {
   checkIns              EventCheckIn[]
   attendances           AttendanceRecord[]
   feedbackEntries       Feedback[]
+  feedbackResponses     FeedbackResponse[]
 
   @@index([status, startAt])
   @@index([type, startAt])
   @@index([courseId])
   @@index([courseModuleId])
   @@index([quizId])
+  @@index([feedbackFormId])
 }
 
 model EventModule {
@@ -515,14 +528,22 @@ model CourseModule {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
+  // Same decoupled-toggle + reference-to-Feedback-library pattern as the Quiz
+  // fields above.
+  quizApplicable     Boolean       @default(false)
+  feedbackApplicable Boolean       @default(false)
+  feedbackFormId     String?
+
   course          Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
   events          Event[]   @relation("EventFromModule")
   batchAssignments BatchAssignment[]
   quiz            Quiz?     @relation(fields: [quizId], references: [id], onDelete: SetNull)
+  feedbackForm    FeedbackForm? @relation(fields: [feedbackFormId], references: [id], onDelete: SetNull)
 
   @@index([courseId, order])
   @@index([isActive])
   @@index([quizId])
+  @@index([feedbackFormId])
 }
 
 // A reusable, fixed 10-question MCQ quiz — created independently in the admin
@@ -557,6 +578,80 @@ model QuizQuestion {
   quiz Quiz @relation(fields: [quizId], references: [id], onDelete: Cascade)
 
   @@index([quizId, order])
+}
+
+enum FeedbackQuestionType {
+  TEXT
+  RATING
+  MCQ
+}
+
+// Reusable, flexible-length, mixed-type feedback form — same reference
+// architecture as Quiz above: authored once in the Forms library, linked by
+// reference into any number of CourseModules/Events. Unlike Quiz, there is no
+// scoring/correct-option here — this is student-reported feedback, not an
+// assessment. Deleting a form that's still linked anywhere is blocked in the
+// service layer (see feedbackLibrary.service.js) — onDelete: SetNull below is
+// just a DB-level backstop, not the primary safeguard.
+model FeedbackForm {
+  id        String   @id @default(cuid())
+  title     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  questions     FeedbackQuestion[]
+  responses     FeedbackResponse[]
+  courseModules CourseModule[]
+  events        Event[]
+}
+
+model FeedbackQuestion {
+  id             String               @id @default(cuid())
+  feedbackFormId String
+  order          Int
+  questionText   String
+  type           FeedbackQuestionType
+  optionA        String?
+  optionB        String?
+  optionC        String?
+  optionD        String?
+
+  feedbackForm FeedbackForm     @relation(fields: [feedbackFormId], references: [id], onDelete: Cascade)
+  answers      FeedbackAnswer[]
+
+  @@index([feedbackFormId, order])
+}
+
+// One student's completed submission of a form for one event — mirrors how
+// ModuleProgress.completedAt gates quiz double-submit, but dedicated (no
+// scoring concept to piggyback on).
+model FeedbackResponse {
+  id             String   @id @default(cuid())
+  feedbackFormId String
+  eventId        String
+  userId         String
+  submittedAt    DateTime @default(now())
+
+  feedbackForm FeedbackForm     @relation(fields: [feedbackFormId], references: [id], onDelete: Cascade)
+  event        Event            @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  answers      FeedbackAnswer[]
+
+  @@unique([eventId, userId])
+  @@index([feedbackFormId])
+}
+
+model FeedbackAnswer {
+  id                 String  @id @default(cuid())
+  feedbackResponseId String
+  feedbackQuestionId String
+  answerText         String? // TEXT questions, and the selected letter for MCQ
+  answerRating       Int?    // RATING questions (1-5)
+
+  feedbackResponse FeedbackResponse @relation(fields: [feedbackResponseId], references: [id], onDelete: Cascade)
+  feedbackQuestion FeedbackQuestion @relation(fields: [feedbackQuestionId], references: [id], onDelete: Cascade)
+
+  @@unique([feedbackResponseId, feedbackQuestionId])
 }
 
 model BatchAssignment {

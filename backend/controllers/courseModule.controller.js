@@ -72,6 +72,18 @@ export const saveModuleQuiz = asyncHandler(async (req, res) => {
   res.status(StatusCodes.OK).json({ success: true, message: "Quiz link updated successfully", data: quiz });
 });
 
+export const getModuleFeedbackForm = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const form = await courseModuleService.getModuleFeedbackForm(id);
+  res.status(StatusCodes.OK).json({ success: true, data: form });
+});
+
+export const saveModuleFeedbackForm = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const form = await courseModuleService.linkModuleFeedback(id, req.validated.body.feedbackFormId);
+  res.status(StatusCodes.OK).json({ success: true, message: "Feedback form link updated successfully", data: form });
+});
+
 export const getModuleUsage = async (req, res, next) => {
   try {
     const { id } = req.params;

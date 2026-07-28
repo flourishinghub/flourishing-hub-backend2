@@ -26,7 +26,9 @@ import {
   getCourseStaff,
   generateExcelExport,
   getEventQuiz,
-  linkEventQuiz
+  linkEventQuiz,
+  getEventFeedbackForm,
+  linkEventFeedback
 } from "../services/admin.service.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
@@ -429,6 +431,23 @@ export const saveEventQuizController = asyncHandler(async (req, res) => {
   }
   const quiz = await linkEventQuiz(req.params.eventId, req.validated.body.quizId);
   res.status(StatusCodes.OK).json({ success: true, message: "Quiz link updated successfully", data: quiz });
+});
+
+// GET / SAVE IN-BUILT FEEDBACK FORM FOR A STANDALONE EVENT
+export const getEventFeedbackFormController = asyncHandler(async (req, res) => {
+  if (req.user.role !== "ADMIN") {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Admin role required");
+  }
+  const form = await getEventFeedbackForm(req.params.eventId);
+  res.status(StatusCodes.OK).json({ success: true, data: form });
+});
+
+export const saveEventFeedbackFormController = asyncHandler(async (req, res) => {
+  if (req.user.role !== "ADMIN") {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Admin role required");
+  }
+  const form = await linkEventFeedback(req.params.eventId, req.validated.body.feedbackFormId);
+  res.status(StatusCodes.OK).json({ success: true, message: "Feedback form link updated successfully", data: form });
 });
 
 // GET EVENT ANALYTICS

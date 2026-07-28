@@ -587,6 +587,44 @@ export const linkEventQuiz = async (eventId, quizId) => {
   return getEventQuiz(eventId);
 };
 
+// Same reference-linking pattern as the quiz pair above, for the Feedback
+// library (see feedbackLibrary.service.js).
+export const getEventFeedbackForm = async (eventId) => {
+  const event = await prisma.event.findUnique({
+    where: { id: eventId },
+    include: { feedbackForm: { include: { questions: { orderBy: { order: "asc" } } } } }
+  });
+  if (!event) {
+    throw new ApiError(StatusCodes.NOT_FOUND, "Event not found");
+  }
+
+  return event.feedbackForm || { feedbackFormId: null, questions: [] };
+};
+
+// Links (or unlinks, when feedbackFormId is null) this standalone event to a
+// feedback form from the Forms library.
+export const linkEventFeedback = async (eventId, feedbackFormId) => {
+  const event = await prisma.event.findUnique({ where: { id: eventId } });
+  if (!event) {
+    throw new ApiError(StatusCodes.NOT_FOUND, "Event not found");
+  }
+  if (event.courseModuleId) {
+    throw new ApiError(
+      StatusCodes.BAD_REQUEST,
+      "This event's feedback form is inherited from its course module — edit the module's feedback instead"
+    );
+  }
+  if (feedbackFormId) {
+    const form = await prisma.feedbackForm.findUnique({ where: { id: feedbackFormId } });
+    if (!form) {
+      throw new ApiError(StatusCodes.NOT_FOUND, "Feedback form not found");
+    }
+  }
+
+  await prisma.event.update({ where: { id: eventId }, data: { feedbackFormId: feedbackFormId || null } });
+  return getEventFeedbackForm(eventId);
+};
+
 // GET EVENT ANALYTICS (workshops grouped by course/module)
 export const getEventAnalytics = async (filters = {}) => {
   const { courseId, moduleId } = filters;

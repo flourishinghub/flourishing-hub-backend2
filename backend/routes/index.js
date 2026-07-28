@@ -15,6 +15,7 @@ import courseRoutes from "./course.routes.js";
 import { notificationRoutes } from "./notification.routes.js";
 import { quizRoutes } from "./quiz.routes.js";
 import { quizLibraryRoutes } from "./quiz-library.routes.js";
+import { feedbackLibraryRoutes } from "./feedback-library.routes.js";
 import { batchAssignmentRoutes } from "./batchAssignment.routes.js";
 
 export const router = Router();
@@ -34,6 +35,7 @@ router.use("/courses", courseRoutes); // Course management routes
 router.use("/notifications", notificationRoutes);
 router.use("/quiz", quizRoutes);
 router.use("/quiz-library", quizLibraryRoutes); // Reusable Quiz-library CRUD (Forms tab)
+router.use("/feedback-library", feedbackLibraryRoutes); // Reusable Feedback-library CRUD (Forms tab)
 router.use("/batch-assignments", batchAssignmentRoutes);
 
 

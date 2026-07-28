@@ -877,6 +877,35 @@ export const getInstructorFeedback = async (userId) => {
     orderBy: { createdAt: "desc" },
   });
 
+  // Text answers from the newer in-built Feedback library (see FeedbackForm
+  // model) also count as comments here, alongside the legacy
+  // Feedback.eventComment field above — an admin/instructor shouldn't have
+  // to check two different places to see what students wrote.
+  const eventIds = assignments.map((a) => a.eventId);
+  const textAnswers = eventIds.length
+    ? await prisma.feedbackAnswer.findMany({
+        where: {
+          answerText: { not: null },
+          feedbackQuestion: { type: "TEXT" },
+          feedbackResponse: { eventId: { in: eventIds } },
+        },
+        select: {
+          answerText: true,
+          feedbackResponse: { select: { eventId: true, submittedAt: true } },
+        },
+      })
+    : [];
+  const textAnswersByEvent = new Map();
+  for (const answer of textAnswers) {
+    const eventId = answer.feedbackResponse.eventId;
+    if (!textAnswersByEvent.has(eventId)) textAnswersByEvent.set(eventId, []);
+    textAnswersByEvent.get(eventId).push({
+      eventComment: answer.answerText,
+      instructorComment: null,
+      createdAt: answer.feedbackResponse.submittedAt,
+    });
+  }
+
   return assignments.map((a) => {
     const fb = a.event.feedbackEntries;
     const withInstructorRating = fb.filter((f) => f.instructorRating != null);
@@ -892,13 +921,16 @@ export const getInstructorFeedback = async (userId) => {
       totalFeedback: fb.length,
       avgEventRating: avgEvent !== null ? Math.round(avgEvent * 10) / 10 : null,
       avgInstructorRating: avgInstructor !== null ? Math.round(avgInstructor * 10) / 10 : null,
-      comments: fb
-        .filter((f) => f.instructorComment || f.eventComment)
-        .map((f) => ({
-          eventComment: f.eventComment || null,
-          instructorComment: f.instructorComment || null,
-          createdAt: f.createdAt,
-        })),
+      comments: [
+        ...fb
+          .filter((f) => f.instructorComment || f.eventComment)
+          .map((f) => ({
+            eventComment: f.eventComment || null,
+            instructorComment: f.instructorComment || null,
+            createdAt: f.createdAt,
+          })),
+        ...(textAnswersByEvent.get(a.eventId) || []),
+      ],
     };
   });
 };

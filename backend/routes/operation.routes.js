@@ -18,7 +18,9 @@ import {
   getMyEventProgressController,
   getMyFeedbackController,
   getMyQuizController,
-  submitMyQuizController
+  submitMyQuizController,
+  getMyFeedbackFormController,
+  submitMyFeedbackFormController
 } from "../controllers/operation.controller.js";
 import { authenticate } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
@@ -32,6 +34,7 @@ import {
   selfCheckInSchema
 } from "../validators/operation.validation.js";
 import { quizSubmitSchema } from "../validators/quiz.validation.js";
+import { feedbackFormSubmitSchema } from "../validators/feedback.validation.js";
 
 export const operationRoutes = Router();
 
@@ -54,3 +57,9 @@ operationRoutes.get("/:eventId/my-progress", getMyEventProgressController);
 operationRoutes.get("/:eventId/my-feedback", getMyFeedbackController);
 operationRoutes.get("/:eventId/quiz", getMyQuizController);
 operationRoutes.post("/:eventId/quiz/submit", validate(quizSubmitSchema), submitMyQuizController);
+operationRoutes.get("/:eventId/feedback-form", getMyFeedbackFormController);
+operationRoutes.post(
+  "/:eventId/feedback-form/submit",
+  validate(feedbackFormSubmitSchema),
+  submitMyFeedbackFormController
+);

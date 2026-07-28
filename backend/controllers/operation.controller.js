@@ -18,7 +18,9 @@ import {
   getMyEventProgress,
   getMyFeedback,
   getMyQuiz,
-  submitMyQuiz
+  submitMyQuiz,
+  getMyFeedbackForm,
+  submitMyFeedbackForm
 } from "../services/operation.service.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 
@@ -138,4 +140,14 @@ export const getMyQuizController = asyncHandler(async (req, res) => {
 export const submitMyQuizController = asyncHandler(async (req, res) => {
   const data = await submitMyQuiz(req.validated.params.eventId, req.validated.body, req.user);
   res.status(StatusCodes.OK).json({ success: true, message: "Quiz submitted successfully", data });
+});
+
+export const getMyFeedbackFormController = asyncHandler(async (req, res) => {
+  const data = await getMyFeedbackForm(req.params.eventId, req.user);
+  res.status(StatusCodes.OK).json({ success: true, data });
+});
+
+export const submitMyFeedbackFormController = asyncHandler(async (req, res) => {
+  const data = await submitMyFeedbackForm(req.validated.params.eventId, req.validated.body, req.user);
+  res.status(StatusCodes.OK).json({ success: true, message: "Feedback submitted successfully", data });
 });
