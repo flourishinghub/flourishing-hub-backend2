@@ -2,19 +2,23 @@ import { z } from "zod";
 
 const feedbackQuestionTypeEnum = z.enum(["TEXT", "RATING", "MCQ"]);
 
-// Options are only required for MCQ — TEXT/RATING questions don't carry them.
+// Options are only required for MCQ — TEXT/RATING questions don't carry
+// them, but the frontend still sends them as empty strings (not omitted), so
+// these can't use `.min(1)` — that would reject a defined-but-empty string,
+// which is exactly what a non-MCQ question sends. The superRefine below is
+// what actually enforces "must be non-empty" for MCQ specifically.
 // Unlike Quiz, there is no correctOption: feedback isn't graded.
 const feedbackQuestionInput = z
   .object({
     questionText: z.string().min(1).max(2000),
     type: feedbackQuestionTypeEnum,
-    optionA: z.string().min(1).max(500).optional(),
-    optionB: z.string().min(1).max(500).optional(),
-    optionC: z.string().min(1).max(500).optional(),
-    optionD: z.string().min(1).max(500).optional()
+    optionA: z.string().max(500).optional(),
+    optionB: z.string().max(500).optional(),
+    optionC: z.string().max(500).optional(),
+    optionD: z.string().max(500).optional()
   })
   .superRefine((data, ctx) => {
-    if (data.type === "MCQ" && !(data.optionA && data.optionB && data.optionC && data.optionD)) {
+    if (data.type === "MCQ" && !(data.optionA?.trim() && data.optionB?.trim() && data.optionC?.trim() && data.optionD?.trim())) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "MCQ questions require all 4 options",
