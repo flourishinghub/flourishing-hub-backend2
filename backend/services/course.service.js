@@ -91,7 +91,12 @@ export const cascadeBundleRegistrationForNewEvent = async (eventId) => {
     where: { id: eventId },
     select: { courseId: true, batch: true, course: { select: { isCompulsory: true } } }
   });
-  if (!event?.courseId || !event.course?.isCompulsory) return;
+  // No batch means there's no bundle to belong to — without this, `batch:
+  // null` in the query below would match every OTHER batch-less event of
+  // this course as if they were all "the same batch," pulling in all of
+  // their registrants (and compounding further each time another batch-less
+  // workshop got created).
+  if (!event?.courseId || !event.course?.isCompulsory || !event.batch) return;
 
   const siblingRegistrations = await prisma.eventRegistration.findMany({
     where: {
