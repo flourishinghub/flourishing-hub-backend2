@@ -222,13 +222,64 @@ export const registerCourseBatchForEvent = async (eventId, courseId, batchCode) 
   }
 };
 
+// Finds existing BatchAssignment rows that belong to a (courseModuleId,
+// batchCode) pair present in this upload, but whose student is NOT among the
+// rows being uploaded for that exact pair — i.e. a student who was in an
+// earlier upload of this same batch and has since been dropped from the
+// roster file. Never touches a pair that isn't in this file at all (a
+// re-upload of one module's batch must not affect any other module/batch of
+// the same course).
+const findMissingFromBatch = async (courseId, validRows) => {
+  const pairs = new Map();
+  for (const r of validRows) {
+    if (!r.batchCode) continue;
+    const key = `${r.courseModuleId || ''}::${r.batchCode.toLowerCase()}`;
+    if (!pairs.has(key)) pairs.set(key, { courseModuleId: r.courseModuleId || null, batchCode: r.batchCode, identifiers: new Set() });
+    const entry = pairs.get(key);
+    if (r.email) entry.identifiers.add(r.email.toLowerCase());
+    if (r.rollNumber) entry.identifiers.add(r.rollNumber.toUpperCase());
+  }
+
+  const toRemove = [];
+  for (const { courseModuleId, batchCode, identifiers } of pairs.values()) {
+    const existing = await prisma.batchAssignment.findMany({
+      where: { courseId, courseModuleId, batchCode: { equals: batchCode, mode: "insensitive" } }
+    });
+    for (const a of existing) {
+      const emailMatch = a.email && identifiers.has(a.email.toLowerCase());
+      const rollMatch = a.rollNumber && identifiers.has(a.rollNumber.toUpperCase());
+      if (!emailMatch && !rollMatch) toRemove.push(a);
+    }
+  }
+  return toRemove;
+};
+
+// Deletes the given BatchAssignment rows and cancels whichever
+// EventRegistration resulted from each one — same inverse-of-registration
+// logic as deleteBatchAssignment above.
+const removeAssignments = async (courseId, rows) => {
+  let cancelledRegistrations = 0;
+  for (const row of rows) {
+    if (row.matchedUserId) {
+      cancelledRegistrations += await cancelRegistrationsForAssignment(row.matchedUserId, courseId, row.courseModuleId, row.batchCode);
+    }
+  }
+  if (rows.length) {
+    await prisma.batchAssignment.deleteMany({ where: { id: { in: rows.map((r) => r.id) } } });
+  }
+  return cancelledRegistrations;
+};
+
 // courseId is required — every batch upload now belongs to a course (selected
 // from Course Management), not a bare batch code alone. resolutionMode is
 // undefined on the first call: if duplicates (same student already uploaded
 // for this course) are found, nothing is written and the duplicate list is
-// returned for the admin to resolve via one of two choices —
-// 'confirm' (upload everyone, duplicates get their record updated/overwritten)
-// or 'skip-duplicates' (only the new, non-duplicate rows are uploaded).
+// returned for the admin to resolve via one of three choices —
+// 'confirm' (upload everyone, duplicates get their record updated/overwritten),
+// 'skip-duplicates' (only the new, non-duplicate rows are uploaded), or
+// 'update-override' (same as 'confirm', PLUS any student previously uploaded
+// for the same module+batch who is absent from this file gets removed —
+// the file becomes the authoritative roster for that exact batch).
 export const uploadBatchAssignment = async ({ fileBuffer, fileName, courseId, resolutionMode }) => {
   if (!fileBuffer) throw new ApiError(StatusCodes.BAD_REQUEST, "File is required");
   if (!courseId) throw new ApiError(StatusCodes.BAD_REQUEST, "Course is required");
@@ -252,6 +303,7 @@ export const uploadBatchAssignment = async ({ fileBuffer, fileName, courseId, re
   ).values()];
 
   if (!resolutionMode && duplicateRows.length > 0) {
+    const missingRows = await findMissingFromBatch(courseId, validRows);
     return {
       requiresResolution: true,
       courseId,
@@ -266,6 +318,13 @@ export const uploadBatchAssignment = async ({ fileBuffer, fileName, courseId, re
         rollNumber: r.rollNumber,
         batchCode: r.batchCode,
         reason: intraFileDuplicateRows.includes(r) ? 'Exact same row (same student, same module, same batch) repeated in this file' : 'Already exists from a previous upload',
+      })),
+      // How many previously-uploaded students, for the exact (module, batch)
+      // pairs in this file, are absent from it — what 'update-override' would
+      // remove. Shown so the admin can see the impact before choosing it.
+      overrideRemovalCount: missingRows.length,
+      overrideRemovalPreview: missingRows.slice(0, 20).map((r) => ({
+        name: r.name, email: r.email, rollNumber: r.rollNumber, batchCode: r.batchCode
       })),
     };
   }
@@ -445,6 +504,13 @@ export const uploadBatchAssignment = async ({ fileBuffer, fileName, courseId, re
       results.errors.push({ row: rowNumber, message: err.message });
       results.skipped++;
     }
+  }
+
+  if (resolutionMode === 'update-override') {
+    const missingRows = await findMissingFromBatch(courseId, validRows);
+    results.removed = missingRows.length;
+    results.cancelledRegistrations = await removeAssignments(courseId, missingRows);
+    if (missingRows.length) await recalcCourseEnrolledCount(courseId);
   }
 
   return results;
