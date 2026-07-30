@@ -20,7 +20,10 @@ import {
   getMyQuiz,
   submitMyQuiz,
   getMyFeedbackForm,
-  submitMyFeedbackForm
+  submitMyFeedbackForm,
+  getEventLiveSummary,
+  getEventQuizForStaff,
+  getEventFeedbackFormForStaff
 } from "../services/operation.service.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 
@@ -100,6 +103,21 @@ export const getEventCheckInsController = asyncHandler(async (req, res) => {
 export const verifyAllCheckInsController = asyncHandler(async (req, res) => {
   const data = await verifyAllCheckIns(req.params.eventId, req.user);
   res.status(StatusCodes.OK).json({ success: true, message: "All pending check-ins verified", data });
+});
+
+export const getEventLiveSummaryController = asyncHandler(async (req, res) => {
+  const data = await getEventLiveSummary(req.params.eventId, req.user);
+  res.status(StatusCodes.OK).json({ success: true, data });
+});
+
+export const getEventQuizForStaffController = asyncHandler(async (req, res) => {
+  const data = await getEventQuizForStaff(req.params.eventId, req.user);
+  res.status(StatusCodes.OK).json({ success: true, data });
+});
+
+export const getEventFeedbackFormForStaffController = asyncHandler(async (req, res) => {
+  const data = await getEventFeedbackFormForStaff(req.params.eventId, req.user);
+  res.status(StatusCodes.OK).json({ success: true, data });
 });
 
 export const getMyAssignedEventsController = asyncHandler(async (req, res) => {

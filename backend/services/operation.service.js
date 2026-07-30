@@ -427,6 +427,96 @@ export const verifyAllCheckIns = async (eventId, actor) => {
   return { verifiedCount: pending.length };
 };
 
+const assertStaffAccess = async (eventId, actor, message) => {
+  const isAllowed =
+    actor.role === "ADMIN" ||
+    (await prisma.eventStaffAssignment.findFirst({
+      where: { eventId, userId: actor.id, role: { in: ["INSTRUCTOR", "ASSOCIATE_INSTRUCTOR"] } }
+    }));
+  if (!isAllowed) {
+    throw new ApiError(StatusCodes.FORBIDDEN, message);
+  }
+};
+
+// Consolidated live-event view for assigned staff — registration/check-in/
+// present counts, plus how many registered students have submitted the
+// in-built quiz/feedback (when configured), so an instructor can see
+// engagement at a glance instead of cross-referencing three separate lists.
+// "Present" is defined the same way the check-in system defines it
+// everywhere else: checked in AND verified (EventCheckIn.status VERIFIED).
+export const getEventLiveSummary = async (eventId, actor) => {
+  await assertStaffAccess(eventId, actor, "Only assigned staff can view this event's summary");
+
+  const event = await prisma.event.findUnique({
+    where: { id: eventId },
+    select: { id: true, title: true }
+  });
+  if (!event) {
+    throw new ApiError(StatusCodes.NOT_FOUND, "Event not found");
+  }
+
+  const [registeredCount, checkInCounts, { quiz }, { form }] = await Promise.all([
+    prisma.eventRegistration.count({ where: { eventId, status: { not: "CANCELLED" } } }),
+    prisma.eventCheckIn.groupBy({ by: ["status"], where: { eventId }, _count: { id: true } }),
+    resolveEventQuiz(eventId),
+    resolveEventFeedbackForm(eventId)
+  ]);
+
+  const countByStatus = Object.fromEntries(checkInCounts.map((c) => [c.status, c._count.id]));
+  const checkedInCount = checkInCounts.reduce((sum, c) => sum + c._count.id, 0);
+
+  let quizSubmittedCount = null;
+  if (quiz) {
+    const quizModule = await prisma.eventModule.findUnique({
+      where: { eventId_sourceQuizId: { eventId, sourceQuizId: quiz.id } }
+    });
+    quizSubmittedCount = quizModule
+      ? await prisma.moduleProgress.count({ where: { moduleId: quizModule.id, completedAt: { not: null } } })
+      : 0;
+  }
+
+  // No in-built feedback form configured — fall back to the legacy
+  // per-event star-rating Feedback model every event's exit checklist
+  // writes to, so this metric is never just blank.
+  const feedbackSubmittedCount = form
+    ? await prisma.feedbackResponse.count({ where: { eventId, feedbackFormId: form.id } })
+    : await prisma.feedback.count({ where: { eventId } });
+
+  return {
+    eventId,
+    title: event.title,
+    registeredCount,
+    checkedInCount,
+    presentCount: countByStatus.VERIFIED || 0,
+    pendingCount: countByStatus.PENDING || 0,
+    absentCount: countByStatus.REJECTED || 0,
+    hasQuiz: Boolean(quiz),
+    quizSubmittedCount,
+    hasFeedbackForm: Boolean(form),
+    feedbackSubmittedCount
+  };
+};
+
+// Read-only view of the event's in-built quiz (with correct answers — this
+// is for assigned staff, not the student taking it) so an instructor can see
+// what's being asked without going through the admin Forms library.
+export const getEventQuizForStaff = async (eventId, actor) => {
+  await assertStaffAccess(eventId, actor, "Only assigned staff can view this event's quiz");
+  const { quiz } = await resolveEventQuiz(eventId);
+  if (!quiz) return { available: false };
+  const questions = await prisma.quizQuestion.findMany({ where: { quizId: quiz.id }, orderBy: { order: "asc" } });
+  return { available: true, title: quiz.title, questions };
+};
+
+// Same as getEventQuizForStaff, for the in-built Feedback library form.
+export const getEventFeedbackFormForStaff = async (eventId, actor) => {
+  await assertStaffAccess(eventId, actor, "Only assigned staff can view this event's feedback form");
+  const { form } = await resolveEventFeedbackForm(eventId);
+  if (!form) return { available: false };
+  const questions = await prisma.feedbackQuestion.findMany({ where: { feedbackFormId: form.id }, orderBy: { order: "asc" } });
+  return { available: true, title: form.title, questions };
+};
+
 export const getMyAttendance = async (userId) => {
   const [registrations, attendanceRecords, verifiedCheckIns, pendingCheckIns, moduleProgress, feedbacks] = await Promise.all([
     prisma.eventRegistration.findMany({
@@ -931,6 +1021,7 @@ export const getMyAssignedEvents = async (actor) => {
         include: {
           modules: { orderBy: { startAt: "asc" } },
           course: { select: { id: true, name: true } },
+          assignments: { select: { role: true, user: { select: { id: true, name: true } } } },
           _count: { select: { registrations: true, checkIns: true } }
         }
       }
