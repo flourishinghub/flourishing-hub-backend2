@@ -6,6 +6,7 @@ import {
   uploadBatchAssignmentController,
   getBatchStatsController,
   listBatchAssignmentsController,
+  deleteBatchAssignmentController,
   downloadTemplateController
 } from "../controllers/batchAssignment.controller.js";
 
@@ -17,4 +18,5 @@ batchAssignmentRoutes.use(authorize("ADMIN"));
 batchAssignmentRoutes.post("/upload", spreadsheetUpload.single("file"), uploadBatchAssignmentController);
 batchAssignmentRoutes.get("/stats", getBatchStatsController);
 batchAssignmentRoutes.get("/records", listBatchAssignmentsController);
+batchAssignmentRoutes.delete("/records/:id", deleteBatchAssignmentController);
 batchAssignmentRoutes.get("/template", downloadTemplateController);

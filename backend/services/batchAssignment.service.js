@@ -2,7 +2,7 @@ import { prisma } from "../database/prisma.js";
 import { parseWorkbookRows, createWorkbookBuffer } from "../utils/excel.js";
 import { ApiError } from "../utils/ApiError.js";
 import { StatusCodes } from "http-status-codes";
-import { notifyCourseBundleRegistration } from "./course.service.js";
+import { notifyCourseBundleRegistration, recalcCourseEnrolledCount } from "./course.service.js";
 
 const norm = (v) => (v === undefined || v === null ? null : String(v).trim() || null);
 const normLower = (v) => norm(v)?.toLowerCase() ?? null;
@@ -533,6 +533,68 @@ export const listBatchAssignments = async ({ batchCode, isMatched, courseId } = 
     },
     orderBy: [{ batchCode: 'asc' }, { name: 'asc' }],
   });
+};
+
+// Cancels (not hard-deletes, to keep history) whichever EventRegistration
+// resulted from a specific (courseModuleId, batchCode) assignment for this
+// user — the exact inverse of registerUserForCourseBatchEvents /
+// registerCourseBatchForEvent. Scoped tightly to that module+batch so a
+// student's OWN open-workshop registrations elsewhere in the same course
+// are never touched by removing them from one batch.
+const cancelRegistrationsForAssignment = async (userId, courseId, courseModuleId, batchCode) => {
+  if (!userId || !batchCode) return 0;
+  const { count } = await prisma.eventRegistration.updateMany({
+    where: {
+      userId,
+      status: { not: "CANCELLED" },
+      event: { courseId, courseModuleId, batch: { equals: batchCode, mode: "insensitive" } }
+    },
+    data: { status: "CANCELLED" }
+  });
+  return count;
+};
+
+// Upload only ever adds/updates BatchAssignment rows — there was never a way
+// to remove a student who's absent from a later re-upload. scope 'current'
+// removes just this one (module, batch) row; 'all-batches' removes every row
+// this same student holds within this same course (not system-wide across
+// unrelated courses) — matched by matchedUserId when signed up, or by
+// email/rollNumber when still pending signup.
+export const deleteBatchAssignment = async (id, scope = "current") => {
+  const target = await prisma.batchAssignment.findUnique({ where: { id } });
+  if (!target) throw new ApiError(StatusCodes.NOT_FOUND, "Batch assignment record not found");
+
+  const rowsToDelete =
+    scope === "all-batches"
+      ? await prisma.batchAssignment.findMany({
+          where: {
+            courseId: target.courseId,
+            OR: [
+              ...(target.matchedUserId ? [{ matchedUserId: target.matchedUserId }] : []),
+              ...(target.email ? [{ email: target.email }] : []),
+              ...(target.rollNumber ? [{ rollNumber: { equals: target.rollNumber, mode: "insensitive" } }] : [])
+            ]
+          }
+        })
+      : [target];
+
+  let cancelledRegistrations = 0;
+  if (target.matchedUserId) {
+    for (const row of rowsToDelete) {
+      cancelledRegistrations += await cancelRegistrationsForAssignment(
+        target.matchedUserId,
+        row.courseId,
+        row.courseModuleId,
+        row.batchCode
+      );
+    }
+  }
+
+  await prisma.batchAssignment.deleteMany({ where: { id: { in: rowsToDelete.map((r) => r.id) } } });
+
+  if (target.courseId) await recalcCourseEnrolledCount(target.courseId);
+
+  return { deletedCount: rowsToDelete.length, cancelledRegistrations };
 };
 
 export const downloadBatchTemplate = async () => {

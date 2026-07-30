@@ -4,6 +4,7 @@ import {
   uploadBatchAssignment,
   getBatchAssignmentStats,
   listBatchAssignments,
+  deleteBatchAssignment,
   downloadBatchTemplate
 } from "../services/batchAssignment.service.js";
 
@@ -35,6 +36,12 @@ export const listBatchAssignmentsController = asyncHandler(async (req, res) => {
     courseId: courseId || undefined,
   });
   res.status(StatusCodes.OK).json({ success: true, data });
+});
+
+export const deleteBatchAssignmentController = asyncHandler(async (req, res) => {
+  const scope = req.query.scope === "all-batches" ? "all-batches" : "current";
+  const result = await deleteBatchAssignment(req.params.id, scope);
+  res.status(StatusCodes.OK).json({ success: true, data: result });
 });
 
 export const downloadTemplateController = asyncHandler(async (_req, res) => {
