@@ -108,6 +108,22 @@ export const updateUserRole = async (userId, role) => {
     });
   }
 
+  // Clean up profile rows left over from a PREVIOUS role — without this, a
+  // user promoted to INSTRUCTOR then later moved back to STUDENT kept their
+  // InstructorProfile forever (this upsert only ever creates/updates one, it
+  // never removed it going the other way), so their account still carried
+  // staff-shaped profile data alongside — or, if they'd never had a
+  // StudentProfile to begin with, in place of — their real one. Never
+  // touches StudentProfile: past academic history (roll number, module
+  // progress) has real value and moving into a staff role shouldn't erase
+  // it, unlike an empty InstructorProfile/AdminProfile row.
+  if (role !== "INSTRUCTOR") {
+    await prisma.instructorProfile.deleteMany({ where: { userId } });
+  }
+  if (role !== "ADMIN") {
+    await prisma.adminProfile.deleteMany({ where: { userId } });
+  }
+
   return user;
 };
 
@@ -134,8 +150,26 @@ export const getUserById = async (userId) => {
   return user;
 };
 
-export const updateUserProfile = async (userId, payload) =>
-  prisma.user.update({
+export const updateUserProfile = async (userId, payload) => {
+  // This is the second, independent path (besides updateUserRole above) that
+  // can write a profile row — without this check it could attach a
+  // studentProfile to a non-student or an instructorProfile to a
+  // non-instructor, producing the exact same "wrong profile shows for this
+  // user" bug regardless of whether the role itself was ever touched.
+  if (payload.studentProfile || payload.instructorProfile) {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
+    if (!user) {
+      throw new ApiError(StatusCodes.NOT_FOUND, "User not found");
+    }
+    if (payload.studentProfile && !["STUDENT", "VOLUNTEER"].includes(user.role)) {
+      throw new ApiError(StatusCodes.BAD_REQUEST, "Cannot set a student profile for a user whose role isn't Student or Volunteer");
+    }
+    if (payload.instructorProfile && user.role !== "INSTRUCTOR") {
+      throw new ApiError(StatusCodes.BAD_REQUEST, "Cannot set an instructor profile for a user whose role isn't Instructor");
+    }
+  }
+
+  return prisma.user.update({
     where: { id: userId },
     data: {
       ...(payload.name !== undefined ? { name: payload.name } : {}),
@@ -183,6 +217,7 @@ export const updateUserProfile = async (userId, payload) =>
       adminProfile: true
     }
   });
+};
 
 export const exportUsers = async (query) => {
   const data = await listUsers({
