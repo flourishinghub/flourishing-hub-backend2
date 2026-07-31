@@ -2,7 +2,7 @@ import { StatusCodes } from "http-status-codes";
 
 import { prisma } from "../database/prisma.js";
 import { ApiError } from "../utils/ApiError.js";
-import { createNotification } from "./notification.service.js";
+import { createNotification, createNotificationsForUsers } from "./notification.service.js";
 
 const getIstDateLabel = (value) =>
   new Date(value).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" });
@@ -415,14 +415,81 @@ export const verifyAllCheckIns = async (eventId, actor) => {
   }
 
   const pending = await prisma.eventCheckIn.findMany({
-    where: { eventId, status: "PENDING" }
+    where: { eventId, status: "PENDING" },
+    select: { id: true, userId: true, moduleId: true }
   });
 
-  await Promise.all(
-    pending.map((checkIn) =>
-      reviewCheckIn(checkIn.id, { status: "VERIFIED", note: "Bulk verified" }, actor)
-    )
-  );
+  if (!pending.length) {
+    return { verifiedCount: 0 };
+  }
+
+  // This used to loop reviewCheckIn (find, update, plus markAttendance's own
+  // ~5 sequential queries) per check-in via Promise.all — fine for a handful,
+  // but at the scale a single compulsory workshop's roster actually hits
+  // (100s of pending check-ins) that's 1000+ sequential round-trips, which
+  // both exhausts Prisma's pooled connection limit AND, even once bounded to
+  // avoid that, takes minutes — comfortably past the frontend's 30s request
+  // timeout, so the button would read as "failed" while still mutating data
+  // in the background. Every check-in in a bulk-verify gets the identical
+  // VERIFIED/PRESENT/"Bulk verified" write, so this does it as a handful of
+  // set-based queries instead of one chain per student.
+  const now = new Date();
+  const checkInIds = pending.map((c) => c.id);
+  const userIds = [...new Set(pending.map((c) => c.userId))];
+
+  await prisma.eventCheckIn.updateMany({
+    where: { id: { in: checkInIds } },
+    data: { status: "VERIFIED", note: "Bulk verified", verifiedById: actor.id }
+  });
+
+  // AttendanceRecord has no unique constraint on (eventId, userId, moduleId)
+  // to upsert against, and different check-ins can carry different
+  // moduleId — group by moduleId so each group's already-existing rows get
+  // one updateMany and its missing rows get one createMany, rather than
+  // guessing a single query can cover every module at once.
+  const byModule = new Map();
+  for (const c of pending) {
+    const key = c.moduleId || "__none__";
+    if (!byModule.has(key)) byModule.set(key, { moduleId: c.moduleId, userIds: [] });
+    byModule.get(key).userIds.push(c.userId);
+  }
+
+  for (const { moduleId, userIds: groupUserIds } of byModule.values()) {
+    const existing = await prisma.attendanceRecord.findMany({
+      where: { eventId, moduleId, userId: { in: groupUserIds } },
+      select: { userId: true }
+    });
+    const existingUserIds = new Set(existing.map((a) => a.userId));
+    const toUpdate = groupUserIds.filter((id) => existingUserIds.has(id));
+    const toCreate = groupUserIds.filter((id) => !existingUserIds.has(id));
+
+    if (toUpdate.length) {
+      await prisma.attendanceRecord.updateMany({
+        where: { eventId, moduleId, userId: { in: toUpdate } },
+        data: { status: "PRESENT", source: "BULK_VERIFY", markedById: actor.id, markedAt: now }
+      });
+    }
+    if (toCreate.length) {
+      await prisma.attendanceRecord.createMany({
+        data: toCreate.map((userId) => ({
+          eventId, moduleId, userId, status: "PRESENT", source: "BULK_VERIFY", markedById: actor.id, markedAt: now
+        }))
+      });
+    }
+  }
+
+  await prisma.eventRegistration.updateMany({
+    where: { eventId, userId: { in: userIds } },
+    data: { checkedInAt: now, status: "ATTENDED" }
+  });
+
+  createNotificationsForUsers(
+    userIds,
+    "success",
+    "Attendance Verified",
+    "Your attendance has been verified by the instructor.",
+    eventId
+  ).catch(() => {});
 
   return { verifiedCount: pending.length };
 };
