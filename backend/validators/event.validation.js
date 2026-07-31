@@ -8,6 +8,8 @@ const eventBody = z.object({
   bannerImageUrl: z.string().url().optional(),
   venue: z.string().max(200).optional(),
   meetLink: z.string().url().optional(),
+  quizLink: z.string().url().optional(),
+  feedbackLink: z.string().url().optional(),
   startAt: z.string().datetime(),
   endAt: z.string().datetime(),
   registrationOpensAt: z.string().datetime().optional(),

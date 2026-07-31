@@ -198,6 +198,7 @@ const mapScheduleRowToEventPayload = (row, meta = {}) => {
     getRowValue(row, ["associate instructor", "associateInstructor", "associate_instructor"])
   );
   const quizLink = normalizeString(getRowValue(row, ["quiz link", "quizLink", "quiz_link"]));
+  const feedbackLink = normalizeString(getRowValue(row, ["feedback link", "feedbackLink", "feedback_link"]));
   const attendedCount = normalizeNumber(
     getRowValue(row, [
       "noofstudentattendedthesession",
@@ -233,6 +234,7 @@ const mapScheduleRowToEventPayload = (row, meta = {}) => {
     venue,
     meetLink: normalizeString(meta.meetLink),
     quizLink,
+    feedbackLink,
     startAt: startAt.toISOString(),
     endAt: endAt.toISOString(),
     registrationOpensAt: meta.registrationOpensAt,
@@ -270,6 +272,7 @@ const mapScheduleRowWithModule = (row, module, meta = {}) => {
     getRowValue(row, ["associate instructor", "associateInstructor", "associate_instructor"])
   );
   const quizLink = normalizeString(getRowValue(row, ["quiz link", "quizLink", "quiz_link"]));
+  const feedbackLink = normalizeString(getRowValue(row, ["feedback link", "feedbackLink", "feedback_link"]));
   const batch = normalizeString(getRowValue(row, ["tutorial/batch", "tutorial", "batch", "Batch", "session", "batch_code", "batchcode", "Batch Code", "BATCH_CODE"]));
 
   const startAt = combineDateAndTime(sessionDate, sessionTime);
@@ -294,6 +297,7 @@ const mapScheduleRowWithModule = (row, module, meta = {}) => {
     status: "PUBLISHED",
     venue,
     quizLink: quizLink || module?.quizLink || undefined,
+    feedbackLink: feedbackLink || module?.feedbackLink || undefined,
     startAt: startAt.toISOString(),
     endAt: endAt.toISOString(),
     capacity: normalizeNumber(meta.capacity) || undefined,

@@ -111,6 +111,7 @@ export const createEvent = async (payload, createdById) => {
       venue: payload.venue,
       meetLink: payload.meetLink,
       quizLink: payload.quizLink || undefined,
+      feedbackLink: payload.feedbackLink || undefined,
       startAt,
       endAt,
       registrationOpensAt: payload.registrationOpensAt ? new Date(payload.registrationOpensAt) : undefined,
@@ -316,6 +317,8 @@ export const updateEvent = async (eventId, payload) => {
       ...(payload.bannerImageUrl !== undefined ? { bannerImageUrl: payload.bannerImageUrl } : {}),
       ...(payload.venue !== undefined ? { venue: payload.venue } : {}),
       ...(payload.meetLink !== undefined ? { meetLink: payload.meetLink } : {}),
+      ...(payload.quizLink !== undefined ? { quizLink: payload.quizLink } : {}),
+      ...(payload.feedbackLink !== undefined ? { feedbackLink: payload.feedbackLink } : {}),
       ...(payload.startAt ? { startAt: new Date(payload.startAt) } : {}),
       ...(payload.endAt ? {
         endAt: (() => {
