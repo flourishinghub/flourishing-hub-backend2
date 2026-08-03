@@ -816,22 +816,45 @@ export const submitMyQuiz = async (eventId, payload, actor) => {
     throw new ApiError(StatusCodes.FORBIDDEN, "Attendance must be verified before taking the quiz");
   }
 
-  // Dedicated EventModule for this quiz, race-free via the (eventId,
-  // sourceQuizId) unique constraint — never collides with real pre-existing
-  // EventModules (templates, bulk MARKS import) or the legacy Google-Form
-  // quiz path's own module lookup.
-  const quizModule = await prisma.eventModule.upsert({
-    where: { eventId_sourceQuizId: { eventId, sourceQuizId: quiz.id } },
-    update: {},
-    create: {
-      eventId,
-      sourceQuizId: quiz.id,
-      title: event.title,
-      startAt: event.startAt,
-      endAt: event.endAt ?? event.startAt,
-      maxMarks: 10
+  // Dedicated EventModule for this quiz — never collides with real
+  // pre-existing EventModules (templates, bulk MARKS import) or the legacy
+  // Google-Form quiz path's own module lookup, thanks to the (eventId,
+  // sourceQuizId) unique constraint.
+  //
+  // The constraint stops duplicate ROWS, but upsert() itself is NOT
+  // race-free: under concurrent submissions (many students finishing a
+  // quiz in the same second — the common case, not an edge case) two
+  // requests can both miss the row in their `update` check and both race
+  // into `create`, so the DB legitimately rejects the second INSERT with a
+  // P2002 unique-violation, which Prisma surfaces as a thrown error instead
+  // of falling back to the update. A 200-student concurrent-submit load
+  // test reproduced this live: 7/200 submissions failed this way. Losing
+  // to that race just means the other concurrent request already created
+  // the module we needed, so re-fetching it is the correct recovery rather
+  // than failing the student's submission outright.
+  let quizModule;
+  try {
+    quizModule = await prisma.eventModule.upsert({
+      where: { eventId_sourceQuizId: { eventId, sourceQuizId: quiz.id } },
+      update: {},
+      create: {
+        eventId,
+        sourceQuizId: quiz.id,
+        title: event.title,
+        startAt: event.startAt,
+        endAt: event.endAt ?? event.startAt,
+        maxMarks: 10
+      }
+    });
+  } catch (err) {
+    if (err.code === "P2002") {
+      quizModule = await prisma.eventModule.findUniqueOrThrow({
+        where: { eventId_sourceQuizId: { eventId, sourceQuizId: quiz.id } }
+      });
+    } else {
+      throw err;
     }
-  });
+  }
 
   const existingProgress = await prisma.moduleProgress.findUnique({
     where: {

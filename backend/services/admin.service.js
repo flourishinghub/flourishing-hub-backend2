@@ -1510,13 +1510,20 @@ export const getEventDetailsForAdmin = async (eventId) => {
     };
   });
 
-  // Format the response
+  // Format the response.
+  // IST is a fixed UTC+5:30 offset (no DST), so shifting the UTC instant by
+  // that offset and reading the components back off it as if they were UTC
+  // gives the correct IST wall-clock date/time regardless of the server's
+  // own timezone — toTimeString()/toISOString() alone would reflect the
+  // server's (Render's, i.e. UTC) local time instead, showing e.g. 4:30 AM
+  // for a workshop actually scheduled at 10:00 AM IST.
+  const istInstant = new Date(event.startAt.getTime() + 5.5 * 60 * 60 * 1000);
   return {
     id: event.id,
     title: event.title,
     description: event.description,
-    date: event.startAt.toISOString().split('T')[0],
-    time: event.startAt.toTimeString().slice(0, 5),
+    date: istInstant.toISOString().split('T')[0],
+    time: istInstant.toISOString().slice(11, 16),
     venue: event.venue,
     mode: event.meetLink ? 'Online' : 'Offline',
     capacity: event.capacity,
