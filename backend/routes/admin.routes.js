@@ -29,7 +29,8 @@ import {
   getEventQuizController,
   saveEventQuizController,
   getEventFeedbackFormController,
-  saveEventFeedbackFormController
+  saveEventFeedbackFormController,
+  exportStudentResponsesController
 } from "../controllers/admin.controller.js";
 import { authenticate } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
@@ -97,3 +98,4 @@ adminRoutes.get("/courses/:courseId/staff", authenticate, getCourseStaffControll
 
 // Export Master Excel
 adminRoutes.get("/analytics/export-excel", authenticate, exportExcelController);
+adminRoutes.get("/analytics/export-student-responses", authenticate, exportStudentResponsesController);

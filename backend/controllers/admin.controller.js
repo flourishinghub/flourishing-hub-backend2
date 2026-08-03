@@ -30,6 +30,7 @@ import {
   getEventFeedbackForm,
   linkEventFeedback
 } from "../services/admin.service.js";
+import { generateStudentResponseExportBuffer } from "../services/studentResponseExport.service.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 
@@ -491,6 +492,26 @@ export const exportExcelController = asyncHandler(async (req, res) => {
   }
   const buffer = await generateExcelExport();
   const filename = `flourishing-hub-report-${new Date().toISOString().split('T')[0]}.xlsx`;
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  res.status(StatusCodes.OK).send(buffer);
+});
+
+// EXPORT STUDENT-WISE QUIZ SCORE / IN-BUILT FEEDBACK ANSWERS / RATING
+// Brand-new, additive endpoint — reads via studentResponseExport.service.js,
+// does not touch any existing analytics/export logic above.
+export const exportStudentResponsesController = asyncHandler(async (req, res) => {
+  if (req.user.role !== "ADMIN") {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Admin role required");
+  }
+  const { course, topic, instructor, batch } = req.query;
+  const buffer = await generateStudentResponseExportBuffer({
+    courseName: course || undefined,
+    topicName: topic || undefined,
+    instructorName: instructor || undefined,
+    batch: batch || undefined
+  });
+  const filename = `student-responses-${new Date().toISOString().split('T')[0]}.xlsx`;
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
   res.status(StatusCodes.OK).send(buffer);
