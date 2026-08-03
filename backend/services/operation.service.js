@@ -751,6 +751,19 @@ const isPastMidSession = (event) => {
   return Date.now() >= midpoint;
 };
 
+// Being past the session's midpoint alone unlocks quiz/feedback for ANY
+// registered student, including one who never showed up at all — the
+// midpoint check only ever replaced the VERIFICATION requirement, not the
+// check-in itself. A self check-in (PENDING is enough — it does not need
+// to be VERIFIED) is still required, so quiz/feedback stay tied to a
+// student having actually shown up.
+const hasCheckedIn = async (eventId, userId) => {
+  const checkIn = await prisma.eventCheckIn.findFirst({
+    where: { eventId, userId, status: { in: ["PENDING", "VERIFIED"] } }
+  });
+  return !!checkIn;
+};
+
 export const getMyQuiz = async (eventId, actor) => {
   const { event, quiz } = await resolveEventQuiz(eventId);
   if (!quiz) {
@@ -760,7 +773,7 @@ export const getMyQuiz = async (eventId, actor) => {
     throw new ApiError(StatusCodes.FORBIDDEN, "Only students can take this quiz");
   }
 
-  if (!isPastMidSession(event)) {
+  if (!isPastMidSession(event) || !(await hasCheckedIn(eventId, actor.id))) {
     return { available: true, locked: true };
   }
 
@@ -818,6 +831,9 @@ export const submitMyQuiz = async (eventId, payload, actor) => {
 
   if (!isPastMidSession(event)) {
     throw new ApiError(StatusCodes.FORBIDDEN, "The quiz unlocks once the session is halfway through");
+  }
+  if (!(await hasCheckedIn(eventId, actor.id))) {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Check in to this session before taking the quiz");
   }
 
   // Dedicated EventModule for this quiz — never collides with real
@@ -930,7 +946,7 @@ export const getMyFeedbackForm = async (eventId, actor) => {
     throw new ApiError(StatusCodes.FORBIDDEN, "Only students can submit this feedback form");
   }
 
-  if (!isPastMidSession(event)) {
+  if (!isPastMidSession(event) || !(await hasCheckedIn(eventId, actor.id))) {
     return { available: true, locked: true };
   }
 
@@ -971,6 +987,9 @@ export const submitMyFeedbackForm = async (eventId, payload, actor) => {
 
   if (!isPastMidSession(event)) {
     throw new ApiError(StatusCodes.FORBIDDEN, "Feedback unlocks once the session is halfway through");
+  }
+  if (!(await hasCheckedIn(eventId, actor.id))) {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Check in to this session before submitting feedback");
   }
 
   const existing = await prisma.feedbackResponse.findUnique({
