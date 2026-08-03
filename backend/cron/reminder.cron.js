@@ -170,9 +170,13 @@ export const sendSessionCompletedNotices = async () => {
 // A check-in an instructor never reviewed (still PENDING) used to sit that
 // way forever — no attendance record, no resolution, indistinguishable from
 // "never checked in" once the session was long over. Auto-rejects any
-// check-in still PENDING 24h+ after its event ended, so every session
+// check-in still PENDING 5 days+ after its event ended, so every session
 // eventually reaches a final state without needing a human to remember it.
-const STALE_CHECKIN_GRACE_MS = 24 * 60 * 60 * 1000;
+// 5 days (not 24h) because quiz/feedback no longer wait on attendance
+// verification to unlock (see isPastMidSession in operation.service.js) —
+// verification is purely a record-keeping/analytics step now, so staff get
+// a realistic window to work through it instead of a same-day deadline.
+const STALE_CHECKIN_GRACE_MS = 5 * 24 * 60 * 60 * 1000;
 
 export const autoRejectStaleCheckIns = async () => {
   const cutoff = new Date(Date.now() - STALE_CHECKIN_GRACE_MS);
@@ -189,7 +193,7 @@ export const autoRejectStaleCheckIns = async () => {
 
   await prisma.eventCheckIn.updateMany({
     where: { id: { in: staleCheckIns.map((c) => c.id) } },
-    data: { status: "REJECTED", note: "Auto-rejected: not reviewed within 24 hours of session end" }
+    data: { status: "REJECTED", note: "Auto-rejected: not reviewed within 5 days of session end" }
   });
 
   // The notification below tells the student this was "marked absent" — that

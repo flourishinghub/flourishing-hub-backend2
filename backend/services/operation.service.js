@@ -737,16 +737,22 @@ const resolveEventQuiz = async (eventId) => {
   return { event, quiz };
 };
 
-const isAttendanceVerified = async (eventId, userId) => {
-  const attendance = await prisma.attendanceRecord.findFirst({
-    where: { eventId, userId },
-    orderBy: { markedAt: "desc" }
-  });
-  return attendance?.status === "PRESENT";
+// Quiz/feedback unlock once the session is halfway through, independent of
+// whether an instructor has verified attendance yet. Attendance review is
+// its own, slower administrative process — staff have up to 5 days after
+// the session ends to work through pending check-ins — and gating quiz/
+// feedback access on that would leave students unable to take either until
+// staff catch up, sometimes well after the session itself has ended.
+// endAt falls back to startAt for a point-in-time session with no explicit end.
+const isPastMidSession = (event) => {
+  const start = new Date(event.startAt).getTime();
+  const end = new Date(event.endAt || event.startAt).getTime();
+  const midpoint = start + (end - start) / 2;
+  return Date.now() >= midpoint;
 };
 
 export const getMyQuiz = async (eventId, actor) => {
-  const { quiz } = await resolveEventQuiz(eventId);
+  const { event, quiz } = await resolveEventQuiz(eventId);
   if (!quiz) {
     return { available: false };
   }
@@ -754,8 +760,7 @@ export const getMyQuiz = async (eventId, actor) => {
     throw new ApiError(StatusCodes.FORBIDDEN, "Only students can take this quiz");
   }
 
-  const verified = await isAttendanceVerified(eventId, actor.id);
-  if (!verified) {
+  if (!isPastMidSession(event)) {
     return { available: true, locked: true };
   }
 
@@ -811,9 +816,8 @@ export const submitMyQuiz = async (eventId, payload, actor) => {
     throw new ApiError(StatusCodes.FORBIDDEN, "Only students can submit this quiz");
   }
 
-  const verified = await isAttendanceVerified(eventId, actor.id);
-  if (!verified) {
-    throw new ApiError(StatusCodes.FORBIDDEN, "Attendance must be verified before taking the quiz");
+  if (!isPastMidSession(event)) {
+    throw new ApiError(StatusCodes.FORBIDDEN, "The quiz unlocks once the session is halfway through");
   }
 
   // Dedicated EventModule for this quiz — never collides with real
@@ -903,7 +907,7 @@ const resolveEventFeedbackForm = async (eventId) => {
   const event = await prisma.event.findUnique({
     where: { id: eventId },
     select: {
-      id: true, title: true, courseModuleId: true, feedbackFormId: true,
+      id: true, title: true, startAt: true, endAt: true, courseModuleId: true, feedbackFormId: true,
       courseModule: { select: { feedbackFormId: true } }
     }
   });
@@ -918,7 +922,7 @@ const resolveEventFeedbackForm = async (eventId) => {
 };
 
 export const getMyFeedbackForm = async (eventId, actor) => {
-  const { form } = await resolveEventFeedbackForm(eventId);
+  const { event, form } = await resolveEventFeedbackForm(eventId);
   if (!form) {
     return { available: false };
   }
@@ -926,8 +930,7 @@ export const getMyFeedbackForm = async (eventId, actor) => {
     throw new ApiError(StatusCodes.FORBIDDEN, "Only students can submit this feedback form");
   }
 
-  const verified = await isAttendanceVerified(eventId, actor.id);
-  if (!verified) {
+  if (!isPastMidSession(event)) {
     return { available: true, locked: true };
   }
 
@@ -958,7 +961,7 @@ export const getMyFeedbackForm = async (eventId, actor) => {
 };
 
 export const submitMyFeedbackForm = async (eventId, payload, actor) => {
-  const { form } = await resolveEventFeedbackForm(eventId);
+  const { event, form } = await resolveEventFeedbackForm(eventId);
   if (!form) {
     throw new ApiError(StatusCodes.NOT_FOUND, "No feedback form is configured for this event");
   }
@@ -966,9 +969,8 @@ export const submitMyFeedbackForm = async (eventId, payload, actor) => {
     throw new ApiError(StatusCodes.FORBIDDEN, "Only students can submit this feedback form");
   }
 
-  const verified = await isAttendanceVerified(eventId, actor.id);
-  if (!verified) {
-    throw new ApiError(StatusCodes.FORBIDDEN, "Attendance must be verified before submitting feedback");
+  if (!isPastMidSession(event)) {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Feedback unlocks once the session is halfway through");
   }
 
   const existing = await prisma.feedbackResponse.findUnique({
