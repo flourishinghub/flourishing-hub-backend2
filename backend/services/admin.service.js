@@ -1448,7 +1448,7 @@ export const getEventDetailsForAdmin = async (eventId) => {
       feedbackEntries: { select: { userId: true, eventRating: true, instructorRating: true } },
       _count: {
         select: {
-          registrations: true,
+          registrations: { where: { status: { not: "CANCELLED" }, user: { isActive: true } } },
           attendances: {
             where: {
               status: 'PRESENT'
