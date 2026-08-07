@@ -735,6 +735,14 @@ export const getWorkshopAnalyticsTable = async () => {
       attendances: {
         select: { status: true, userId: true }
       },
+      // PENDING/VERIFIED check-ins — needed to tell "checked in, awaiting
+      // instructor review" apart from "never checked in at all". Both cases
+      // have no AttendanceRecord and so are indistinguishable via
+      // attendances alone (both fall back to NOT_MARKED below).
+      checkIns: {
+        where: { status: { in: ["PENDING", "VERIFIED"] } },
+        select: { userId: true }
+      },
       feedbackEntries: { select: { eventRating: true, userId: true } },
       modules: {
         select: {
@@ -754,6 +762,8 @@ export const getWorkshopAnalyticsTable = async () => {
     // Build lookup maps
     const attendanceMap = {};
     event.attendances.forEach(a => { attendanceMap[a.userId] = a.status; });
+
+    const checkedInUserIds = new Set(event.checkIns.map(c => c.userId));
 
     const feedbackMap = {};
     event.feedbackEntries.forEach(f => { feedbackMap[f.userId] = f.eventRating; });
@@ -804,6 +814,7 @@ export const getWorkshopAnalyticsTable = async () => {
         department: reg.user.studentProfile?.department || null,
         programme: reg.user.studentProfile?.programme || null,
         attendanceStatus: attendanceMap[reg.userId] || "NOT_MARKED",
+        hasCheckedIn: checkedInUserIds.has(reg.userId),
         quizCompleted: progress?.completed || false,
         score: progress?.marks ?? null,
         maxScore: progress?.maxMarks ?? null,
