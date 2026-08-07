@@ -21,6 +21,7 @@ export const createModule = async (courseId, data) => {
       isActive: data.isActive ?? true,
       quizApplicable: data.quizApplicable ?? false,
       feedbackApplicable: data.feedbackApplicable ?? false,
+      ratingApplicable: data.ratingApplicable ?? true,
     },
   });
 };
@@ -71,6 +72,7 @@ export const updateModule = async (id, data) => {
   if (data.isActive !== undefined) updateData.isActive = data.isActive;
   if (data.quizApplicable !== undefined) updateData.quizApplicable = data.quizApplicable;
   if (data.feedbackApplicable !== undefined) updateData.feedbackApplicable = data.feedbackApplicable;
+  if (data.ratingApplicable !== undefined) updateData.ratingApplicable = data.ratingApplicable;
 
   return prisma.courseModule.update({ where: { id }, data: updateData });
 };

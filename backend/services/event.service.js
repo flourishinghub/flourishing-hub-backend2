@@ -33,7 +33,7 @@ const publicEventInclude = {
     }
   },
   course: { select: { id: true, name: true } },
-  courseModule: { select: { id: true, title: true, quizLink: true, feedbackLink: true } },
+  courseModule: { select: { id: true, title: true, quizLink: true, feedbackLink: true, ratingApplicable: true } },
   // Name-only (no email) — this is the public events list/detail response,
   // so a registered student can see who's running their workshop without
   // exposing staff contact info.

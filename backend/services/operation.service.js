@@ -330,6 +330,29 @@ export const submitFeedback = async (eventId, payload, actor) => {
     throw new ApiError(StatusCodes.FORBIDDEN, "Only registered participants can submit feedback");
   }
 
+  // ratingApplicable is a standalone-event-only toggle (course-linked events
+  // inherit it from their module, same pattern as quizApplicable/
+  // feedbackApplicable) — an admin can turn the star-rating step off for a
+  // given session entirely, so a student can't submit one the UI never
+  // should have shown.
+  const event = await prisma.event.findUnique({
+    where: { id: eventId },
+    select: {
+      courseModuleId: true,
+      ratingApplicable: true,
+      courseModule: { select: { ratingApplicable: true } }
+    }
+  });
+  if (!event) {
+    throw new ApiError(StatusCodes.NOT_FOUND, "Event not found");
+  }
+  const ratingApplicable = event.courseModuleId
+    ? (event.courseModule?.ratingApplicable ?? true)
+    : event.ratingApplicable;
+  if (!ratingApplicable) {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Rating is not enabled for this session");
+  }
+
   return prisma.feedback.upsert({
     where: {
       eventId_userId: {

@@ -244,6 +244,12 @@ model Event {
   // (no courseModuleId); course-linked events inherit both from their module.
   quizApplicable        Boolean                @default(false)
   feedbackApplicable    Boolean                @default(false)
+  // Independent toggle for the student-facing star-rating card (legacy
+  // Feedback model), decoupled from quiz/feedback library entirely — default
+  // true so every existing event keeps its prior always-shown behavior until
+  // an admin explicitly turns it off. Only meaningful for a standalone event
+  // (no courseModuleId); course-linked events inherit from their module.
+  ratingApplicable      Boolean                @default(true)
   // Direct link to a reusable Feedback-library form (see FeedbackForm model
   // below) — same standalone-only/inherit-from-module rule as quizId.
   feedbackFormId        String?
@@ -534,6 +540,9 @@ model CourseModule {
   quizApplicable     Boolean       @default(false)
   feedbackApplicable Boolean       @default(false)
   feedbackFormId     String?
+  // Same independent rating toggle as Event.ratingApplicable above — default
+  // true to preserve existing always-shown behavior for every module.
+  ratingApplicable   Boolean       @default(true)
 
   course          Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
   events          Event[]   @relation("EventFromModule")
