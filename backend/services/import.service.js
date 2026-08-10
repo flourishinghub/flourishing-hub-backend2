@@ -717,21 +717,74 @@ const importUsers = async (rows, meta) => {
   });
 };
 
-// Schedule template rows only carry the instructor/associate instructor's
-// name as free text — this matches it against a real account of the given
-// role so createEvent can create an actual EventStaffAssignment instead of
-// the name just sitting in the description as decoration. No match just
-// means no assignment is made; it doesn't fail the row.
-const resolveStaffId = async (name, role) => {
-  if (!name) return undefined;
-  const user = await prisma.user.findFirst({
-    where: { name: { equals: name, mode: "insensitive" }, role },
-    select: { id: true }
-  });
-  return user?.id;
+// Small edit distance — only used for the conservative fuzzy staff-name
+// matching below, so not worth pulling in a library for.
+const levenshtein = (a, b) => {
+  const dp = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[a.length][b.length];
 };
 
+const stripSpaces = (s) => s.toLowerCase().replace(/\s+/g, "");
+
+// Schedule template rows only carry the instructor/associate instructor's
+// name as free text — this matches it against a real account of the given
+// role, in three widening passes:
+//   1. Exact, case-insensitive.
+//   2. Whitespace-collapsed — catches a name typed/copy-pasted with a
+//      misplaced space ("Abhi Shek Bagal" vs "Abhishek Bagal": identical
+//      once spaces are stripped).
+//   3. Conservative edit-distance fuzzy match (threshold scales with name
+//      length) — but ONLY when exactly one candidate is closest. Two
+//      similarly-named staff both within the threshold is exactly the
+//      situation where guessing is worse than leaving it unmatched, so
+//      that case falls through to no match rather than picking either.
+// No match just means no assignment is made; it doesn't fail the row —
+// callers (createEvent via importEvents) leave instructorId/
+// associateInstructorId undefined, and annotateStaffMatches below uses the
+// same three passes to flag this in the import preview before it happens.
+const matchStaffByName = (typedName, candidates) => {
+  if (!typedName || !candidates.length) return null;
+
+  const exact = candidates.find((c) => c.name.toLowerCase() === typedName.toLowerCase());
+  if (exact) return exact;
+
+  const strippedTyped = stripSpaces(typedName);
+  const collapsed = candidates.find((c) => stripSpaces(c.name) === strippedTyped);
+  if (collapsed) return collapsed;
+
+  const threshold = Math.max(1, Math.floor(strippedTyped.length * 0.2));
+  const scored = candidates
+    .map((c) => ({ candidate: c, distance: levenshtein(strippedTyped, stripSpaces(c.name)) }))
+    .filter((s) => s.distance <= threshold)
+    .sort((a, b) => a.distance - b.distance);
+  if (scored.length === 1) return scored[0].candidate;
+  if (scored.length > 1 && scored[0].distance < scored[1].distance) return scored[0].candidate;
+  return null;
+};
+
+// Candidates are fetched once per role per import run (by the caller, via
+// fetchStaffCandidates below) rather than once per row — an import of a
+// few dozen rows would otherwise re-query the same small instructor list
+// that many times over.
+const resolveStaffId = (name, candidates) => matchStaffByName(name, candidates)?.id;
+
+const fetchStaffCandidates = async (role) =>
+  prisma.user.findMany({ where: { role }, select: { id: true, name: true } });
+
 const importEvents = async (rows, meta, createdById) => {
+  const [instructorCandidates, associateCandidates] = await Promise.all([
+    fetchStaffCandidates("INSTRUCTOR"),
+    fetchStaffCandidates("ASSOCIATE_INSTRUCTOR")
+  ]);
+
   // Module-based import: course + workshop selected from the modal
   if (meta.courseId && meta.courseModuleId) {
     const module = await prisma.courseModule.findUnique({
@@ -744,8 +797,8 @@ const importEvents = async (rows, meta, createdById) => {
       if (!payload) {
         throw new ApiError(StatusCodes.BAD_REQUEST, "Row missing date or time");
       }
-      payload.instructorId = await resolveStaffId(payload.instructor, "INSTRUCTOR");
-      payload.associateInstructorId = await resolveStaffId(payload.associateInstructorName, "ASSOCIATE_INSTRUCTOR");
+      payload.instructorId = resolveStaffId(payload.instructor, instructorCandidates);
+      payload.associateInstructorId = resolveStaffId(payload.associateInstructorName, associateCandidates);
       const event = await createEvent(payload, createdById);
       // payload.batch already resolved to the modal's Batch Code (if set) or
       // this row's own tutorial/batch column — see mapScheduleRowWithModule.
@@ -767,8 +820,8 @@ const importEvents = async (rows, meta, createdById) => {
           throw new ApiError(StatusCodes.BAD_REQUEST, "Event row is missing required fields");
         }
 
-        payload.instructorId = await resolveStaffId(payload.instructor, "INSTRUCTOR");
-        payload.associateInstructorId = await resolveStaffId(payload.associateInstructorName, "ASSOCIATE_INSTRUCTOR");
+        payload.instructorId = resolveStaffId(payload.instructor, instructorCandidates);
+        payload.associateInstructorId = resolveStaffId(payload.associateInstructorName, associateCandidates);
         const event = await createEvent(payload, createdById);
         // This branch (Course Name + Tutorial style sheets) never registered
         // anyone — every other import path calls autoRegisterBatch, this one
@@ -841,8 +894,8 @@ const importEvents = async (rows, meta, createdById) => {
       payload.courseModuleId = match.id;
     }
 
-    payload.instructorId = await resolveStaffId(payload.instructor, "INSTRUCTOR");
-    payload.associateInstructorId = await resolveStaffId(payload.associateInstructorName, "ASSOCIATE_INSTRUCTOR");
+    payload.instructorId = resolveStaffId(payload.instructor, instructorCandidates);
+    payload.associateInstructorId = resolveStaffId(payload.associateInstructorName, associateCandidates);
     const event = await createEvent(payload, createdById);
     // payload.batch already resolved to the modal's Batch Code (if set) or this
     // row's own tutorial/batch column — see mapScheduleRowToEventPayload.
@@ -1025,33 +1078,23 @@ export const listImportJobs = async () =>
 // Flags each event with whether its instructor/associateInstructorName text
 // actually matches a real account, so the admin sees mismatches (typos,
 // partial names) in the preview instead of the assignment silently not
-// happening after import. A single bulk query, not one lookup per row.
+// happening after import. Uses the exact same matchStaffByName passes (and
+// the same candidate lists) as the real import path, so the preview's
+// matched/unmatched flags never disagree with what actually gets assigned.
 const annotateStaffMatches = async (events) => {
-  const names = new Set();
-  events.forEach((e) => {
-    if (e.instructor) names.add(e.instructor);
-    if (e.associateInstructorName) names.add(e.associateInstructorName);
-  });
-  if (names.size === 0) return events;
+  const hasAnyName = events.some((e) => e.instructor || e.associateInstructorName);
+  if (!hasAnyName) return events;
 
-  const accounts = await prisma.user.findMany({
-    where: {
-      name: { in: [...names] },
-      role: { in: ["INSTRUCTOR", "ASSOCIATE_INSTRUCTOR"] }
-    },
-    select: { name: true, role: true }
-  });
-
-  const matchedNames = {
-    INSTRUCTOR: new Set(accounts.filter((a) => a.role === "INSTRUCTOR").map((a) => a.name.toLowerCase())),
-    ASSOCIATE_INSTRUCTOR: new Set(accounts.filter((a) => a.role === "ASSOCIATE_INSTRUCTOR").map((a) => a.name.toLowerCase())),
-  };
+  const [instructorCandidates, associateCandidates] = await Promise.all([
+    fetchStaffCandidates("INSTRUCTOR"),
+    fetchStaffCandidates("ASSOCIATE_INSTRUCTOR")
+  ]);
 
   return events.map((e) => ({
     ...e,
-    instructorMatched: e.instructor ? matchedNames.INSTRUCTOR.has(e.instructor.toLowerCase()) : null,
+    instructorMatched: e.instructor ? !!matchStaffByName(e.instructor, instructorCandidates) : null,
     associateInstructorMatched: e.associateInstructorName
-      ? matchedNames.ASSOCIATE_INSTRUCTOR.has(e.associateInstructorName.toLowerCase())
+      ? !!matchStaffByName(e.associateInstructorName, associateCandidates)
       : null,
   }));
 };
