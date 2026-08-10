@@ -510,8 +510,14 @@ export const uploadBatchAssignment = async ({ fileBuffer, fileName, courseId, re
     const missingRows = await findMissingFromBatch(courseId, validRows);
     results.removed = missingRows.length;
     results.cancelledRegistrations = await removeAssignments(courseId, missingRows);
-    if (missingRows.length) await recalcCourseEnrolledCount(courseId);
   }
+
+  // The main loop above registers newly-matched students into this course's
+  // events (registerUserForCourseBatchEvents), but nothing refreshed the
+  // cached Course.enrolledCount afterward except the update-override
+  // removal path — so a normal bulk upload left "total students assigned"
+  // stale (often still 0) even though registrations were created correctly.
+  await recalcCourseEnrolledCount(courseId);
 
   return results;
 };
