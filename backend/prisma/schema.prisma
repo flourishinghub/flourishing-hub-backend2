@@ -384,6 +384,7 @@ model ModuleProgress {
   updatedAt          DateTime    @updatedAt
   studentProfile     StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
   module             EventModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  quizAnswers        QuizAnswer[]
 
   @@unique([studentProfileId, moduleId])
   @@index([studentProfileId, completedAt])
@@ -585,9 +586,29 @@ model QuizQuestion {
   optionD       String
   correctOption String // "A" | "B" | "C" | "D"
 
-  quiz Quiz @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  quiz    Quiz         @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  answers QuizAnswer[]
 
   @@index([quizId, order])
+}
+
+// Per-question record of what a student picked on quiz submission — added
+// after discovering submitMyQuiz computed the score from the submitted
+// answers array and then discarded it, so only the aggregate score was ever
+// recoverable (see ModuleProgress.marksObtained). This only captures
+// answers from submissions made after this model was added; nothing here
+// for quizzes submitted earlier, since that data was never persisted.
+model QuizAnswer {
+  id                String  @id @default(cuid())
+  moduleProgressId  String
+  quizQuestionId    String
+  selectedOption    String  // "A" | "B" | "C" | "D"
+  isCorrect         Boolean
+
+  moduleProgress ModuleProgress @relation(fields: [moduleProgressId], references: [id], onDelete: Cascade)
+  quizQuestion   QuizQuestion   @relation(fields: [quizQuestionId], references: [id], onDelete: Cascade)
+
+  @@unique([moduleProgressId, quizQuestionId])
 }
 
 enum FeedbackQuestionType {

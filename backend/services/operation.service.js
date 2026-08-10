@@ -921,7 +921,7 @@ export const submitMyQuiz = async (eventId, payload, actor) => {
     }
   }
 
-  await prisma.moduleProgress.upsert({
+  const progress = await prisma.moduleProgress.upsert({
     where: {
       studentProfileId_moduleId: {
         studentProfileId: actor.studentProfile.id,
@@ -935,6 +935,23 @@ export const submitMyQuiz = async (eventId, payload, actor) => {
       marksObtained: score,
       completedAt: new Date()
     }
+  });
+
+  // Per-question answers, so Analytics exports can show what a student
+  // actually picked, not just the aggregate score. skipDuplicates makes this
+  // race-tolerant the same way the quizModule upsert above is — a retry
+  // after losing a concurrent-submission race just no-ops here instead of
+  // throwing on the (moduleProgressId, quizQuestionId) unique constraint.
+  await prisma.quizAnswer.createMany({
+    data: payload.answers
+      .filter((a) => correctByQuestionId.has(a.questionId))
+      .map((a) => ({
+        moduleProgressId: progress.id,
+        quizQuestionId: a.questionId,
+        selectedOption: a.selectedOption,
+        isCorrect: correctByQuestionId.get(a.questionId) === a.selectedOption
+      })),
+    skipDuplicates: true
   });
 
   return { score, maxScore: 10 };

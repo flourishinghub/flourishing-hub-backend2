@@ -1,32 +1,41 @@
-// Student-wise export of in-built Quiz score, in-built Feedback-form answers,
-// and session Rating — filterable by course/topic(module)/instructor/batch.
+// Student-wise export of in-built Quiz answers, in-built Feedback-form
+// answers, and session Rating — filterable by course/topic(module)/
+// instructor/batch.
 //
 // Deliberately a brand-new, standalone file rather than an addition to
 // admin.service.js: it only READS existing data through fresh Prisma
 // queries of its own — it does not import, call, or modify any existing
 // service function, so nothing already live is touched by adding this.
 //
-// Known limitation (by existing design, not something this file changes):
-// individual quiz answers (which option a student picked per question) are
-// never persisted anywhere — only the aggregate score lands in
-// ModuleProgress.marksObtained. So "Quiz" here is score/pass-fail only.
-// In-built Feedback, by contrast, does store a full per-question answer
-// (FeedbackAnswer), so that part of the export is complete detail.
+// Quiz and Feedback questions each get their own column (dynamic — built
+// from whichever questions actually appear across the matching rows), so
+// the sheet reads like a Google Forms response export instead of one
+// concatenated "answers" blob.
+//
+// Known limitation: QuizAnswer only exists for quizzes submitted after that
+// table was added — a submission from before then has no per-question
+// answers to show (the questionId->correctOption map moved through memory
+// and was discarded, only the aggregate score was ever persisted). Those
+// rows show blank quiz-question columns; "Quiz Score" and "Quiz Result"
+// still work for every submission since those come from ModuleProgress.
 import { prisma } from "../database/prisma.js";
 import { createWorkbookBuffer } from "../utils/excel.js";
 
 const QUIZ_PASS_THRESHOLD = 4; // out of 10 — same threshold used by admin analytics' Pass/Fail (filterUtils.ts computeModuleStatus)
 
-const formatFeedbackAnswers = (answers, questionById) => {
-  if (!answers?.length) return "";
-  return answers
-    .map((a) => {
-      const q = questionById.get(a.feedbackQuestionId);
-      const label = q?.questionText || a.feedbackQuestionId;
-      const value = a.answerRating != null ? `${a.answerRating}/5` : (a.answerText ?? "");
-      return `${label}: ${value}`;
-    })
-    .join(" | ");
+const OPTION_FIELD = { A: "optionA", B: "optionB", C: "optionC", D: "optionD" };
+
+const formatMcqAnswer = (question, letter) => {
+  if (!letter) return "";
+  const optionText = question?.[OPTION_FIELD[letter]];
+  return optionText ? `${letter}. ${optionText}` : letter;
+};
+
+const formatFeedbackAnswer = (question, answer) => {
+  if (!answer) return "";
+  if (question.type === "RATING") return answer.answerRating != null ? `${answer.answerRating}/5` : "";
+  if (question.type === "MCQ") return formatMcqAnswer(question, answer.answerText);
+  return answer.answerText ?? "";
 };
 
 export const getStudentResponseExportRows = async (filters = {}) => {
@@ -46,10 +55,13 @@ export const getStudentResponseExportRows = async (filters = {}) => {
       course: { select: { id: true, name: true } },
       courseModule: {
         select: {
-          id: true, title: true, quizId: true, feedbackFormId: true,
-          feedbackForm: { select: { id: true, title: true, questions: true } }
+          id: true, title: true,
+          quiz: { select: { id: true, questions: { orderBy: { order: "asc" } } } },
+          feedbackForm: { select: { id: true, questions: { orderBy: { order: "asc" } } } }
         }
       },
+      quiz: { select: { id: true, questions: { orderBy: { order: "asc" } } } },
+      feedbackForm: { select: { id: true, questions: { orderBy: { order: "asc" } } } },
       assignments: { include: { user: { select: { id: true, name: true } } } },
       registrations: {
         where: { status: { not: "CANCELLED" }, user: { isActive: true } },
@@ -63,14 +75,30 @@ export const getStudentResponseExportRows = async (filters = {}) => {
           }
         }
       },
-      modules: { select: { id: true, sourceQuizId: true, progressEntries: { select: { studentProfileId: true, marksObtained: true, completedAt: true } } } },
+      modules: {
+        select: {
+          id: true, sourceQuizId: true,
+          progressEntries: {
+            select: {
+              studentProfileId: true, marksObtained: true, completedAt: true,
+              quizAnswers: { select: { quizQuestionId: true, selectedOption: true } }
+            }
+          }
+        }
+      },
       feedbackEntries: { select: { userId: true, eventRating: true, instructorRating: true, eventComment: true, instructorComment: true } },
       feedbackResponses: { select: { userId: true, submittedAt: true, answers: true } }
     },
     orderBy: { startAt: "desc" }
   });
 
-  const rows = [];
+  // Pass 1: build one intermediate record per (event, registration), keeping
+  // the raw per-question data alongside the base fields — column sets for
+  // quiz/feedback questions aren't known until every matching event has been
+  // walked (different topics can use different quizzes/forms).
+  const intermediateRows = [];
+  const quizQuestionLabels = new Map(); // questionId -> "Quiz Q1: ..." label, insertion order = column order
+  const feedbackQuestionLabels = new Map(); // questionId -> "Feedback Q1: ..." label
 
   for (const event of events) {
     const topicTitle = event.courseModule?.title || event.title;
@@ -81,6 +109,25 @@ export const getStudentResponseExportRows = async (filters = {}) => {
     const instructorNameResolved = instructorAssignment?.user?.name || "";
     if (instructorName && instructorNameResolved !== instructorName) continue;
 
+    // Same inherit-from-module-else-own-field resolution as
+    // operation.service.js's resolveEventQuiz / resolveEventFeedbackForm.
+    const resolvedQuiz = event.courseModuleId ? event.courseModule?.quiz : event.quiz;
+    const resolvedFeedbackForm = event.courseModuleId ? event.courseModule?.feedbackForm : event.feedbackForm;
+
+    const quizQuestionById = new Map((resolvedQuiz?.questions || []).map((q) => [q.id, q]));
+    quizQuestionById.forEach((q, id) => {
+      if (!quizQuestionLabels.has(id)) {
+        quizQuestionLabels.set(id, { base: `Quiz Q${q.order}: ${q.questionText}`, topicTitle });
+      }
+    });
+
+    const feedbackQuestionById = new Map((resolvedFeedbackForm?.questions || []).map((q) => [q.id, q]));
+    feedbackQuestionById.forEach((q, id) => {
+      if (!feedbackQuestionLabels.has(id)) {
+        feedbackQuestionLabels.set(id, { base: `Feedback Q${q.order}: ${q.questionText}`, topicTitle });
+      }
+    });
+
     const quizModule = event.modules.find((m) => m.sourceQuizId != null);
     const quizProgressByProfileId = new Map();
     if (quizModule) {
@@ -89,9 +136,6 @@ export const getStudentResponseExportRows = async (filters = {}) => {
       }
     }
 
-    const feedbackQuestionById = new Map(
-      (event.courseModule?.feedbackForm?.questions || []).map((q) => [q.id, q])
-    );
     const feedbackResponseByUserId = new Map(event.feedbackResponses.map((r) => [r.userId, r]));
     const ratingByUserId = new Map(event.feedbackEntries.map((f) => [f.userId, f]));
 
@@ -99,35 +143,79 @@ export const getStudentResponseExportRows = async (filters = {}) => {
       const sp = reg.user.studentProfile;
       const quizProgress = sp ? quizProgressByProfileId.get(sp.id) : null;
       const hasQuizScore = quizProgress?.marksObtained != null;
+      const quizAnswerByQuestionId = new Map((quizProgress?.quizAnswers || []).map((a) => [a.quizQuestionId, a.selectedOption]));
 
       const fbResponse = feedbackResponseByUserId.get(reg.userId);
+      const feedbackAnswerByQuestionId = new Map((fbResponse?.answers || []).map((a) => [a.feedbackQuestionId, a]));
       const rating = ratingByUserId.get(reg.userId);
 
-      rows.push({
-        "Student Name": reg.user.name || "",
-        "Roll No": sp?.rollNumber || "",
-        Email: reg.user.email || "",
-        Department: sp?.department || "",
-        Programme: sp?.programme || "",
-        Batch: event.batch || sp?.cohort || "",
-        "Course Name": event.course?.name || "",
-        "Topic / Module": topicTitle,
-        Instructor: instructorNameResolved,
-        "Associate Instructor": associateAssignment?.user?.name || "",
-        "Quiz Score (/10)": hasQuizScore ? quizProgress.marksObtained : "",
-        "Quiz Result": hasQuizScore ? (quizProgress.marksObtained >= QUIZ_PASS_THRESHOLD ? "Pass" : "Fail") : "",
-        "Quiz Completed At": quizProgress?.completedAt ? quizProgress.completedAt.toISOString() : "",
-        "Feedback Submitted": fbResponse ? "Yes" : "No",
-        "Feedback Answers": fbResponse ? formatFeedbackAnswers(fbResponse.answers, feedbackQuestionById) : "",
-        "Feedback Submitted At": fbResponse?.submittedAt ? fbResponse.submittedAt.toISOString() : "",
-        "Session Rating (1-5)": rating?.eventRating ?? "",
-        "Instructor Rating (1-5)": rating?.instructorRating ?? "",
-        "Rating Comment": rating?.eventComment || ""
+      intermediateRows.push({
+        base: {
+          "Student Name": reg.user.name || "",
+          "Roll No": sp?.rollNumber || "",
+          Email: reg.user.email || "",
+          Department: sp?.department || "",
+          Programme: sp?.programme || "",
+          Batch: event.batch || sp?.cohort || "",
+          "Course Name": event.course?.name || "",
+          "Topic / Module": topicTitle,
+          Instructor: instructorNameResolved,
+          "Associate Instructor": associateAssignment?.user?.name || "",
+          "Quiz Score (/10)": hasQuizScore ? quizProgress.marksObtained : "",
+          "Quiz Result": hasQuizScore ? (quizProgress.marksObtained >= QUIZ_PASS_THRESHOLD ? "Pass" : "Fail") : "",
+          "Quiz Completed At": quizProgress?.completedAt ? quizProgress.completedAt.toISOString() : "",
+          "Feedback Submitted": fbResponse ? "Yes" : "No",
+          "Feedback Submitted At": fbResponse?.submittedAt ? fbResponse.submittedAt.toISOString() : "",
+          "Session Rating (1-5)": rating?.eventRating ?? "",
+          "Instructor Rating (1-5)": rating?.instructorRating ?? "",
+          "Rating Comment": rating?.eventComment || ""
+        },
+        quizQuestionById,
+        quizAnswerByQuestionId,
+        feedbackQuestionById,
+        feedbackAnswerByQuestionId
       });
     }
   }
 
-  return rows;
+  // Different modules commonly reuse the exact same question wording (e.g.
+  // every module's feedback form asking "Share your feedback about this
+  // session") — those are still DIFFERENT questionIds needing separate
+  // columns, or one row's answer would silently overwrite another's in the
+  // flat object below (two different keys can't collide, but two identical
+  // label STRINGS used as keys can). Suffix the topic title onto every label
+  // that collides with another; labels with no collision stay exactly as
+  // Quiz/Feedback Q<n>: <text>.
+  const resolveLabelCollisions = (labelMap) => {
+    const countByBase = new Map();
+    for (const { base } of labelMap.values()) {
+      countByBase.set(base, (countByBase.get(base) || 0) + 1);
+    }
+    return [...labelMap.entries()].map(([questionId, { base, topicTitle }]) => [
+      questionId,
+      countByBase.get(base) > 1 ? `${base} (${topicTitle})` : base
+    ]);
+  };
+
+  // Pass 2: now that every question column is known, flatten each row —
+  // blank for a question this row's event didn't actually use.
+  const quizColumns = resolveLabelCollisions(quizQuestionLabels);
+  const feedbackColumns = resolveLabelCollisions(feedbackQuestionLabels);
+
+  return intermediateRows.map((row) => {
+    const flat = { ...row.base };
+    for (const [questionId, label] of quizColumns) {
+      const question = row.quizQuestionById.get(questionId);
+      const selected = row.quizAnswerByQuestionId.get(questionId);
+      flat[label] = question && selected ? formatMcqAnswer(question, selected) : "";
+    }
+    for (const [questionId, label] of feedbackColumns) {
+      const question = row.feedbackQuestionById.get(questionId);
+      const answer = row.feedbackAnswerByQuestionId.get(questionId);
+      flat[label] = question ? formatFeedbackAnswer(question, answer) : "";
+    }
+    return flat;
+  });
 };
 
 export const generateStudentResponseExportBuffer = async (filters = {}) => {
