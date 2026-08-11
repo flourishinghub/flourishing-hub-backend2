@@ -103,17 +103,27 @@ export const register = async (payload) => {
       include: { user: true }
     });
     if (existingRoll) {
-      // "Not yet a real, confirmed account" covers two cases, not just
-      // isVerified: false — a non-IITB signup (personal Gmail, common typo
-      // like "oitb.ac.in") gets isVerified: true immediately since it skips
-      // OTP entirely, but PENDING_APPROVAL means no admin has actually
-      // confirmed it's them either. Without also catching that case here, a
-      // student who first signed up with the wrong email domain — never
-      // received an OTP because there was none to receive — hits a hard
-      // "already registered" wall the moment they try to correct it to
-      // their real @iitb.ac.in address, with no way back into either
-      // account.
-      const existingIsUnclaimed = !existingRoll.user.isVerified || existingRoll.user.approvalStatus === "PENDING_APPROVAL";
+      // "Not yet a real, confirmed account" means: it was never actually
+      // established through the real @iitb.ac.in + OTP path. A non-IITB
+      // signup (personal Gmail, common typo like "oitb.ac.in") gets
+      // isVerified: true immediately since it skips OTP entirely — so
+      // isVerified alone can't be trusted as "this is a real confirmed
+      // account" for those. Originally this only treated PENDING_APPROVAL
+      // as still-unclaimed, which left two real lockouts: an admin who
+      // APPROVES a personal-email signup (a plausible admin action — the
+      // account looks legitimate) or DECLINES one (the more common
+      // response — telling the student to use their real email) both move
+      // it out of PENDING_APPROVAL, and either way the student then hits a
+      // hard "already registered" wall the moment they retry with their
+      // actual @iitb.ac.in address, permanently locked out of both the old
+      // account and a fresh one under the same roll number. The only
+      // account that should ever be treated as genuinely claimed is one
+      // that completed real OTP verification on an @iitb.ac.in address —
+      // anything else (any approval state, on a non-IITB email) is fair
+      // game to redirect, since a matching roll number is strong evidence
+      // it's the same person correcting their email, not two different
+      // people colliding on one roll number.
+      const existingIsUnclaimed = !(existingRoll.user.email.endsWith("@iitb.ac.in") && existingRoll.user.isVerified);
       if (existingIsUnclaimed) {
         const retryEmail = payload.email.trim().toLowerCase();
         let targetEmail = existingRoll.user.email;
