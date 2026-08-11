@@ -201,11 +201,24 @@ export const autoRejectStaleCheckIns = async () => {
   // an AttendanceRecord, so the student stayed NOT_MARKED in analytics
   // forever instead of ABSENT. Write the record that was already being
   // promised.
+  //
+  // Never downgrade a record that's already PRESENT, though — this stale
+  // PENDING check-in is just one self-check-in ATTEMPT that never got
+  // reviewed; if attendance for this student was separately, legitimately
+  // already confirmed PRESENT (an instructor verified a different check-in,
+  // a manual/bulk attendance correction, etc.), that fact is real and this
+  // loop has no business overwriting it. Blindly doing so was a real
+  // production bug (found 2026-08-11): it silently flipped 102 already-PRESENT
+  // students back to ABSENT across 7 MTC batches whose real attendance had
+  // been reconciled from physical sign-in sheets after they'd separately
+  // self-check-in'd (and never got verified) in the app.
+  const downgraded = [];
   for (const checkIn of staleCheckIns) {
     const existingAttendance = await prisma.attendanceRecord.findFirst({
       where: { eventId: checkIn.event.id, userId: checkIn.userId, moduleId: checkIn.moduleId || null }
     });
     if (existingAttendance) {
+      if (existingAttendance.status === "PRESENT") continue;
       await prisma.attendanceRecord.update({
         where: { id: existingAttendance.id },
         data: { status: "ABSENT", source: "AUTO_REJECT_STALE_CHECKIN", markedAt: new Date() }
@@ -222,9 +235,13 @@ export const autoRejectStaleCheckIns = async () => {
         }
       });
     }
+    downgraded.push(checkIn);
   }
 
-  for (const checkIn of staleCheckIns) {
+  // Only the students actually marked absent above get the "marked absent"
+  // notice — someone whose already-PRESENT record was left alone shouldn't
+  // be told otherwise.
+  for (const checkIn of downgraded) {
     await createNotificationsForUsers(
       [checkIn.userId],
       "warning",
