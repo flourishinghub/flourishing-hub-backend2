@@ -15,6 +15,7 @@ export const createModule = async (courseId, data) => {
       description: data.description,
       posterUrl: data.posterUrl,
       quizLink: data.quizLink,
+      postQuizLink: data.postQuizLink,
       feedbackLink: data.feedbackLink,
       duration: data.duration,
       order: data.order ?? 0,
@@ -66,6 +67,7 @@ export const updateModule = async (id, data) => {
   if (data.description !== undefined) updateData.description = data.description;
   if (data.posterUrl !== undefined) updateData.posterUrl = data.posterUrl;
   if (data.quizLink !== undefined) updateData.quizLink = data.quizLink;
+  if (data.postQuizLink !== undefined) updateData.postQuizLink = data.postQuizLink;
   if (data.feedbackLink !== undefined) updateData.feedbackLink = data.feedbackLink;
   if (data.duration !== undefined) updateData.duration = data.duration;
   if (data.order !== undefined) updateData.order = data.order;

@@ -227,7 +227,17 @@ model Event {
   allowVolunteerSignup  Boolean                @default(true)
   requiresCheckIn       Boolean                @default(true)
   registrationMode      RegistrationMode       @default(OPEN)
+  // Legacy external Google-Form quiz link. Semantically the "Pre Session
+  // Quiz" once postQuizLink is also set — see postQuizLink below.
   quizLink              String?
+  // Second external Google-Form quiz link, "Post Session Quiz" — unlocks on
+  // the existing hasCheckedIn+isPastMidSession rule, same as quizLink used
+  // to unconditionally. quizLink itself becomes "Pre Session Quiz" instead:
+  // accessible as soon as the student has checked in (PENDING is enough),
+  // no midpoint wait. Only meaningful as a pre/post PAIR — if just one of
+  // the two is set, it's still shown as a single unlabeled external link
+  // with the old (mid-session) gating, unchanged.
+  postQuizLink          String?
   feedbackLink          String?
   createdById           String
   templateId            String?
@@ -523,7 +533,9 @@ model CourseModule {
   title           String
   description     String?
   posterUrl       String?
+  // Same Pre/Post Session Quiz pairing as Event.quizLink/postQuizLink above.
   quizLink        String?
+  postQuizLink    String?
   feedbackLink    String?
   duration        String?
   order           Int       @default(0)
