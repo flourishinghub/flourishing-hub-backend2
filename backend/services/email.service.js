@@ -8,7 +8,13 @@ import { StatusCodes } from "http-status-codes";
 // (or delete the guards) once bulk-import volume settles down.
 const NON_ESSENTIAL_EMAILS_DISABLED = true;
 
-// Create transporter
+// Reused across all sends instead of opening a fresh SMTP connection per
+// email — under signup bursts (many students verifying at once during a
+// live session), creating a new connection per email was tripping Gmail's
+// connection-rate throttling and surfacing as random "failed to send OTP"
+// for whichever requests landed in the throttled window. Pooling keeps a
+// small set of connections alive and queues sends through them instead.
+let pooledTransporter;
 const createTransporter = () => {
   // Check if email credentials are configured
   if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
@@ -16,17 +22,25 @@ const createTransporter = () => {
     return null;
   }
 
+  if (pooledTransporter) return pooledTransporter;
+
   const maskedUser = process.env.EMAIL_USER.replace(/^(.{3}).*(@.*)$/, "$1***$2");
   console.log(`Email transporter configured for ${maskedUser} (app password length: ${process.env.EMAIL_PASSWORD.length} chars)`);
 
-  return nodemailer.createTransport({
+  pooledTransporter = nodemailer.createTransport({
     service: "gmail",
+    pool: true,
+    maxConnections: 5,
+    maxMessages: 100,
     auth: {
       user: process.env.EMAIL_USER,
       pass: process.env.EMAIL_PASSWORD
     }
   });
+  return pooledTransporter;
 };
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Generate 6-digit OTP
 export const generateOTP = () => {
@@ -135,8 +149,21 @@ export const sendOTPEmail = async (email, name, otp) => {
       `
     };
 
-    await transporter.sendMail(mailOptions);
-    return true;
+    // Transient Gmail throttling (connection refused, rate-limited login,
+    // temporary 4xx) is common during signup bursts and clears within
+    // seconds — retry a couple of times before giving up on the student.
+    let lastError;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await transporter.sendMail(mailOptions);
+        return true;
+      } catch (sendError) {
+        lastError = sendError;
+        console.warn(`OTP email attempt ${attempt}/3 failed for ${email}: ${sendError.message}`);
+        if (attempt < 3) await sleep(attempt * 1000);
+      }
+    }
+    throw lastError;
   } catch (error) {
     console.error("Error sending OTP email:", error);
     throw new ApiError(StatusCodes.INTERNAL_SERVER_ERROR, "Failed to send verification email");
