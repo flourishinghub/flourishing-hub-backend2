@@ -33,8 +33,31 @@ export const createAndSendOTP = async (userId, email, name) => {
       }
     });
 
-    // Send OTP email
-    await sendOTPEmail(email, name, otp);
+    // Send OTP email in the background — don't make the caller (signup,
+    // resend-OTP) wait on Gmail. Under a burst of concurrent OTP requests,
+    // awaiting this here meant every request held its HTTP response open
+    // until its turn came up in the SMTP pool's queue, so most of a large
+    // simultaneous batch blew past the frontend's 30s timeout even though
+    // the email would have gone out eventually. The OTP record is already
+    // committed above, so verification still works once the email lands.
+    // sendOTPEmail already retries 3x internally (see email.service.js) —
+    // this only fires once those retries are exhausted. Logged as a single
+    // structured line (fixed "OTP_EMAIL_SEND_FAILED" marker) so it can be
+    // grepped/alerted on in Render's log viewer instead of getting lost in
+    // normal traffic noise. Recovery path is the existing Resend OTP button
+    // (POST /auth/resend-otp) — this doesn't retry further on its own.
+    sendOTPEmail(email, name, otp).catch((err) => {
+      console.error(
+        "OTP_EMAIL_SEND_FAILED",
+        JSON.stringify({
+          userId,
+          email,
+          name,
+          error: err.message,
+          at: new Date().toISOString()
+        })
+      );
+    });
 
     return { success: true };
   } catch (error) {

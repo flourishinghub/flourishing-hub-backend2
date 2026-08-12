@@ -30,7 +30,7 @@ const createTransporter = () => {
   pooledTransporter = nodemailer.createTransport({
     service: "gmail",
     pool: true,
-    maxConnections: 5,
+    maxConnections: 10,
     maxMessages: 100,
     auth: {
       user: process.env.EMAIL_USER,
