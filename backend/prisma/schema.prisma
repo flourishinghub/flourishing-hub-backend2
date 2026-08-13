@@ -282,6 +282,7 @@ model Event {
   attendances           AttendanceRecord[]
   feedbackEntries       Feedback[]
   feedbackResponses     FeedbackResponse[]
+  pendingAttendances    PendingAttendance[]
 
   @@index([status, startAt])
   @@index([type, startAt])
@@ -416,6 +417,34 @@ model AttendanceRecord {
 
   @@index([eventId, status])
   @@index([moduleId, userId])
+}
+
+// Attendance for a signed-in-on-paper student who has no account yet —
+// same "match at signup, no account created up front" shape as
+// BatchAssignment, but for a single event's attendance instead of
+// course/batch enrollment. Shown merged into the event's admin attendance
+// list/count immediately (isMatched: false is still "Present", just not
+// yet tied to a real user). Promoted to a real AttendanceRecord +
+// EventRegistration(ATTENDED) by autoAssignCohortOnSignup once the
+// student's email/roll number matches a verified signup.
+model PendingAttendance {
+  id            String           @id @default(cuid())
+  eventId       String
+  email         String?
+  rollNumber    String?
+  name          String?
+  status        AttendanceStatus @default(PRESENT)
+  source        String?
+  isMatched     Boolean          @default(false)
+  matchedUserId String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  event         Event            @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId])
+  @@index([rollNumber])
+  @@index([email])
 }
 
 model Feedback {

@@ -1529,6 +1529,26 @@ export const getEventDetailsForAdmin = async (eventId) => {
   // server's (Render's, i.e. UTC) local time instead, showing e.g. 4:30 AM
   // for a workshop actually scheduled at 10:00 AM IST.
   const istInstant = new Date(event.startAt.getTime() + 5.5 * 60 * 60 * 1000);
+
+  // Students who signed the physical attendance sheet but have no account
+  // yet (see PendingAttendance model) — shown as Present here immediately
+  // rather than waiting for them to eventually sign up, so the admin count
+  // matches the paper sheet today. Promoted to a real AttendanceRecord once
+  // the student's email/roll number matches a verified signup (see
+  // autoAssignCohortOnSignup in batchAssignment.service.js).
+  const pending = await prisma.pendingAttendance.findMany({
+    where: { eventId, isMatched: false, status: "PRESENT" }
+  });
+  const pendingAsAttendees = pending.map((p) => ({
+    id: p.id,
+    userId: null,
+    status: p.status,
+    markedAt: p.createdAt,
+    source: p.source,
+    isPending: true,
+    user: { name: p.name, email: p.email, studentProfile: { rollNumber: p.rollNumber } }
+  }));
+
   return {
     id: event.id,
     title: event.title,
@@ -1540,10 +1560,10 @@ export const getEventDetailsForAdmin = async (eventId) => {
     capacity: event.capacity,
     status: event.status.toLowerCase(),
     registeredCount: event._count.registrations,
-    attendedCount: event._count.attendances,
+    attendedCount: event._count.attendances + pending.length,
     registrants: registrantsWithQuizAndFeedback,
     volunteers: [...event.availabilityResponses, ...event.assignments],
-    attendees: event.attendances
+    attendees: [...event.attendances, ...pendingAsAttendees]
   };
 };
 

@@ -3,6 +3,7 @@ import { parseWorkbookRows, createWorkbookBuffer } from "../utils/excel.js";
 import { ApiError } from "../utils/ApiError.js";
 import { StatusCodes } from "http-status-codes";
 import { notifyCourseBundleRegistration, recalcCourseEnrolledCount } from "./course.service.js";
+import { markAttendance } from "./operation.service.js";
 
 const norm = (v) => (v === undefined || v === null ? null : String(v).trim() || null);
 const normLower = (v) => norm(v)?.toLowerCase() ?? null;
@@ -539,8 +540,6 @@ export const autoAssignCohortOnSignup = async (userId, email, rollNumber) => {
       }
     });
 
-    if (!assignments.length) return null;
-
     for (const assignment of assignments) {
       await prisma.studentProfile.update({
         where: { userId },
@@ -562,7 +561,50 @@ export const autoAssignCohortOnSignup = async (userId, email, rollNumber) => {
       }
     }
 
-    return assignments[assignments.length - 1].batchCode;
+    // A student who signed a physical attendance sheet before they had an
+    // account (see PendingAttendance model) — promote every matching pending
+    // row to a real registration + attendance record now that a verified
+    // account exists to attach it to. Failure here shouldn't block signup
+    // itself, so each row is best-effort.
+    const pendingRows = await prisma.pendingAttendance.findMany({
+      where: {
+        isMatched: false,
+        OR: [
+          ...(email ? [{ email: email.toLowerCase() }] : []),
+          ...(rollNumber ? [{ rollNumber: { equals: rollNumber, mode: "insensitive" } }] : [])
+        ]
+      }
+    });
+    if (pendingRows.length) {
+      const admin = await prisma.user.findFirst({ where: { role: "ADMIN" } });
+      for (const pending of pendingRows) {
+        try {
+          const existingReg = await prisma.eventRegistration.findFirst({
+            where: { eventId: pending.eventId, userId, status: { not: "CANCELLED" } }
+          });
+          if (!existingReg) {
+            await prisma.eventRegistration.create({
+              data: { eventId: pending.eventId, userId, status: "REGISTERED" }
+            });
+          }
+          if (admin) {
+            await markAttendance(
+              pending.eventId,
+              { userId, moduleId: null, status: pending.status, source: pending.source },
+              admin
+            );
+          }
+          await prisma.pendingAttendance.update({
+            where: { id: pending.id },
+            data: { isMatched: true, matchedUserId: userId }
+          });
+        } catch {
+          // best-effort — leave this row unmatched, it can be reconciled manually
+        }
+      }
+    }
+
+    return assignments[assignments.length - 1]?.batchCode ?? null;
   } catch {
     return null;
   }
