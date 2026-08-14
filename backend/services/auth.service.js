@@ -198,7 +198,13 @@ export const register = async (payload) => {
     }
   }
 
-  const passwordHash = await bcrypt.hash(payload.password, 12);
+  // Cost 10 (not 12) — bcryptjs is pure-JS, not the native/C++ bcrypt, so
+// each hash blocks Node's single event loop for real wall-clock time.
+// Under a signup burst, cost-12 hashing across many concurrent requests
+// queued up badly enough to blow past the frontend's 30s timeout.
+// Cost 10 is still industry-standard and ~4x faster; existing cost-12
+// hashes keep verifying fine since bcrypt reads cost from the hash itself.
+const passwordHash = await bcrypt.hash(payload.password, 10);
 
   // Check if email is IITB email
   const isIITBEmail = payload.email.trim().toLowerCase().endsWith('@iitb.ac.in');
@@ -399,7 +405,7 @@ export const resetPassword = async (userId, token, newPassword) => {
     throw new ApiError(StatusCodes.BAD_REQUEST, "Invalid or expired reset link. Please request a new one.");
   }
 
-  const passwordHash = await bcrypt.hash(newPassword, 12);
+  const passwordHash = await bcrypt.hash(newPassword, 10);
 
   await prisma.$transaction([
     prisma.user.update({ where: { id: userId }, data: { passwordHash } }),
