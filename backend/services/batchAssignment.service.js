@@ -557,7 +557,30 @@ export const autoAssignCohortOnSignup = async (userId, email, rollNumber) => {
       });
 
       if (assignment.courseId) {
-        await registerUserForCourseBatchEvents(userId, assignment.courseId, assignment.batchCode);
+        // Retries on transient DB errors (e.g. connection-pool exhaustion
+        // during a signup burst) — without this, a student could get
+        // isMatched: true (cohort matched) but never actually registered
+        // for their batch's events, since the outer try/catch around this
+        // whole function swallows failures silently to avoid blocking
+        // signup. Found via 12 students stuck in exactly that state during
+        // the D3 batch launch (11 Aug 2026).
+        let lastErr;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            await registerUserForCourseBatchEvents(userId, assignment.courseId, assignment.batchCode);
+            lastErr = null;
+            break;
+          } catch (err) {
+            lastErr = err;
+            if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 500));
+          }
+        }
+        if (lastErr) {
+          console.error(
+            "BATCH_EVENT_REGISTRATION_FAILED",
+            JSON.stringify({ userId, courseId: assignment.courseId, batchCode: assignment.batchCode, error: lastErr.message })
+          );
+        }
       }
     }
 
