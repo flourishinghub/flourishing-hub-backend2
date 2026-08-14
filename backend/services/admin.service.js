@@ -1530,6 +1530,14 @@ export const getEventDetailsForAdmin = async (eventId) => {
   // for a workshop actually scheduled at 10:00 AM IST.
   const istInstant = new Date(event.startAt.getTime() + 5.5 * 60 * 60 * 1000);
 
+  // Total students uploaded via the batch-assignment CSV for this event's
+  // course+batch (regardless of whether they've signed up yet) — lets the
+  // admin see "12 out of 346" instead of just "12", since registeredCount
+  // alone only counts students who already have accounts and are matched.
+  const batchUploadTotal = event.courseId && event.batch
+    ? await prisma.batchAssignment.count({ where: { courseId: event.courseId, batchCode: event.batch } })
+    : 0;
+
   // Students who signed the physical attendance sheet but have no account
   // yet (see PendingAttendance model) — shown as Present here immediately
   // rather than waiting for them to eventually sign up, so the admin count
@@ -1560,6 +1568,7 @@ export const getEventDetailsForAdmin = async (eventId) => {
     capacity: event.capacity,
     status: event.status.toLowerCase(),
     registeredCount: event._count.registrations,
+    batchUploadTotal,
     attendedCount: event._count.attendances + pending.length,
     registrants: registrantsWithQuizAndFeedback,
     volunteers: [...event.availabilityResponses, ...event.assignments],
