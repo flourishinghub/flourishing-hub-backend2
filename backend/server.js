@@ -35,8 +35,11 @@ const start = async () => {
       await prisma.$executeRawUnsafe(
         `ALTER TYPE "Programme" ADD VALUE IF NOT EXISTS 'DUAL_DEGREE'`
       );
+      await prisma.$executeRawUnsafe(
+        `ALTER TYPE "Programme" ADD VALUE IF NOT EXISTS 'BS'`
+      );
     } catch (err) {
-      console.error("Failed to ensure DUAL_DEGREE enum value exists:", err.message);
+      console.error("Failed to ensure Programme enum values exist:", err.message);
     }
 
     server = app.listen(env.PORT, () => {

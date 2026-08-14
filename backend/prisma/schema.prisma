@@ -25,6 +25,7 @@ enum CheckInStatus {
 enum Programme {
   BTECH
   BDES
+  BS
   MTECH
   PHD
   MSC
