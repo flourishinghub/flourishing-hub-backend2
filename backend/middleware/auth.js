@@ -1,9 +1,36 @@
 import { StatusCodes } from "http-status-codes";
 
 import { prisma } from "../database/prisma.js";
+import { cache } from "../utils/cache.js";
 import { ApiError } from "../utils/ApiError.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { verifyAccessToken } from "../utils/jwt.js";
+
+// Every authenticated request re-ran this exact lookup from scratch — under
+// concurrent load (e.g. hundreds of students polling their dashboard/
+// check-in status every few seconds) that's the same user row fetched
+// dozens of times a second. A short TTL cache collapses that to one DB hit
+// per user per window; 5s is short enough that a role/approval-status
+// change (rare, admin-driven) is still visible almost immediately.
+const AUTH_CACHE_TTL_SECONDS = 5;
+
+const loadUser = async (payload) => {
+  const cacheKey = `auth-user:${payload.sub || payload.email}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  const user = await prisma.user.findUnique({
+    where: payload.sub ? { id: payload.sub } : { email: payload.email },
+    include: {
+      studentProfile: true,
+      instructorProfile: true,
+      adminProfile: true
+    }
+  });
+
+  if (user) cache.set(cacheKey, user, AUTH_CACHE_TTL_SECONDS);
+  return user;
+};
 
 export const authenticate = asyncHandler(async (req, _res, next) => {
   const header = req.headers.authorization;
@@ -15,14 +42,7 @@ export const authenticate = asyncHandler(async (req, _res, next) => {
 
   try {
     const payload = verifyAccessToken(token);
-    const user = await prisma.user.findUnique({
-      where: payload.sub ? { id: payload.sub } : { email: payload.email },
-      include: {
-        studentProfile: true,
-        instructorProfile: true,
-        adminProfile: true
-      }
-    });
+    const user = await loadUser(payload);
 
     if (!user || !user.isActive) {
       throw new ApiError(StatusCodes.UNAUTHORIZED, "User account is inactive");
@@ -51,14 +71,7 @@ export const authenticateOptional = asyncHandler(async (req, _res, next) => {
 
   try {
     const payload = verifyAccessToken(token);
-    const user = await prisma.user.findUnique({
-      where: payload.sub ? { id: payload.sub } : { email: payload.email },
-      include: {
-        studentProfile: true,
-        instructorProfile: true,
-        adminProfile: true
-      }
-    });
+    const user = await loadUser(payload);
 
     if (user?.isActive) {
       req.user = user;
