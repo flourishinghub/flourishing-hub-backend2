@@ -27,7 +27,8 @@ dashboardRoutes.get("/associate/dashboard", authenticate, cacheResponse("associa
 dashboardRoutes.get("/admin/dashboard", authenticate, cacheResponse("admin-dashboard", 20), adminDashboardController);
 
 // New feature endpoints
-dashboardRoutes.get("/student/bundle-progress", authenticate, studentBundleProgressController);
+// 4 parallel queries, hit on every dashboard mount — was uncached.
+dashboardRoutes.get("/student/bundle-progress", authenticate, cacheResponse("bundle-progress", 15), studentBundleProgressController);
 dashboardRoutes.get("/instructor/feedback", authenticate, instructorFeedbackController);
 dashboardRoutes.get("/volunteer/capacity", authenticate, volunteerCapacityController);
 

@@ -43,7 +43,8 @@ import { feedbackFormSubmitSchema } from "../validators/feedback.validation.js";
 export const operationRoutes = Router();
 
 operationRoutes.use(authenticate);
-operationRoutes.get("/attendance/me", getMyAttendanceController);
+// 6 parallel queries, hit on every dashboard mount — was uncached.
+operationRoutes.get("/attendance/me", cacheResponse("my-attendance", 15), getMyAttendanceController);
 operationRoutes.get("/my-assigned-events", getMyAssignedEventsController);
 operationRoutes.get("/:eventId/check-ins", getEventCheckInsController);
 operationRoutes.post("/:eventId/check-ins/verify-all", verifyAllCheckInsController);
