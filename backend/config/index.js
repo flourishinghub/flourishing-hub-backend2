@@ -28,7 +28,12 @@ const envSchema = z.object({
   RATE_LIMIT_WINDOW_MS: z.coerce.number().default(15 * 60 * 1000),
   RATE_LIMIT_MAX: z.coerce.number().default(1000),
   AUTH_RATE_LIMIT_MAX: z.coerce.number().default(30),
-  CACHE_TTL_SECONDS: z.coerce.number().default(60)
+  CACHE_TTL_SECONDS: z.coerce.number().default(60),
+  // Off by default — per-query logging is too verbose to leave on
+  // permanently. Flip to "true" (Render dashboard env var, no redeploy of
+  // code needed) during a known high-load window to get exact query text +
+  // duration in the logs instead of only endpoint-level response time.
+  PRISMA_QUERY_LOGGING: z.enum(["true", "false"]).default("false")
 });
 
 const parsedEnv = envSchema.parse(process.env);
