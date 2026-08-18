@@ -758,6 +758,18 @@ export const getWorkshopAnalyticsTable = async () => {
     orderBy: { startAt: "desc" }
   });
 
+  // Students who signed the physical attendance sheet but have no account yet
+  // (see PendingAttendance model) — without this, this table's present/absent
+  // counts silently disagreed with getEventDetailsForAdmin's (which already
+  // includes them), showing e.g. 24 instead of 26 for the same workshop.
+  const pendingRows = await prisma.pendingAttendance.findMany({
+    where: { eventId: { in: events.map(e => e.id) }, isMatched: false, status: "PRESENT" }
+  });
+  const pendingByEvent = {};
+  for (const p of pendingRows) {
+    (pendingByEvent[p.eventId] ||= []).push(p);
+  }
+
   return events.map(event => {
     // Build lookup maps
     const attendanceMap = {};
@@ -823,6 +835,29 @@ export const getWorkshopAnalyticsTable = async () => {
         registrationStatus: reg.status
       };
     });
+
+    // Pending (no-account-yet) signers, appended as synthetic student rows —
+    // same shape/fields as a real registrant, minus anything that requires
+    // an actual account (quiz/rating/registrationStatus).
+    const pendingStudents = (pendingByEvent[event.id] || []).map(p => ({
+      userId: null,
+      name: p.name || "—",
+      email: p.email || "—",
+      rollNo: p.rollNumber || "—",
+      batch: event.batch || "—",
+      department: null,
+      programme: null,
+      attendanceStatus: "PRESENT",
+      hasCheckedIn: true,
+      quizCompleted: false,
+      score: null,
+      maxScore: null,
+      quizScore: null,
+      rating: null,
+      registrationStatus: null,
+      isPending: true
+    }));
+    students.push(...pendingStudents);
 
     const instructor = event.assignments.find(a => a.role === "INSTRUCTOR");
     const associateInstructor = event.assignments.find(a => a.role === "ASSOCIATE_INSTRUCTOR");
