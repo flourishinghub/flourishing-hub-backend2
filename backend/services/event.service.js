@@ -485,6 +485,39 @@ export const getEventRecord = async (eventId) => {
     (entry) => entry.instructorRating !== null
   );
 
+  // Students who signed the physical attendance sheet but have no account yet
+  // (see PendingAttendance model) — they have no EventRegistration to appear
+  // in `roster` via, so the export used to silently drop them even though the
+  // admin dashboard already counted them as Present. Appended here as
+  // roster-shaped rows (registrationId/userId null) so exports match the
+  // dashboard count. Promoted to a real registration+attendance once the
+  // student signs up (see autoAssignCohortOnSignup in batchAssignment.service.js).
+  const pendingSigners = await prisma.pendingAttendance.findMany({
+    where: { eventId, isMatched: false, status: "PRESENT" }
+  });
+  const pendingRosterEntries = pendingSigners.map((p) => ({
+    registrationId: null,
+    userId: null,
+    name: p.name,
+    email: p.email,
+    profileImageUrl: null,
+    rollNumber: p.rollNumber,
+    department: null,
+    programme: null,
+    yearOfStudy: null,
+    registrationStatus: "PENDING_NO_ACCOUNT",
+    registeredAt: p.createdAt,
+    sessionLabel: null,
+    checkedInAt: null,
+    attendanceStatus: p.status,
+    checkInStatus: null,
+    eventRating: null,
+    instructorRating: null,
+    eventComment: null,
+    instructorComment: null,
+    quizScores: []
+  }));
+
   return {
     event: {
       id: event.id,
@@ -497,7 +530,8 @@ export const getEventRecord = async (eventId) => {
     },
     summary: {
       totalRegistrants: event.registrations.length,
-      totalAttended: roster.filter((entry) => entry.attendanceStatus === "PRESENT").length,
+      totalAttended:
+        roster.filter((entry) => entry.attendanceStatus === "PRESENT").length + pendingRosterEntries.length,
       avgEventRating:
         event.feedbackEntries.length > 0
           ? event.feedbackEntries.reduce((sum, entry) => sum + entry.eventRating, 0) /
@@ -512,7 +546,7 @@ export const getEventRecord = async (eventId) => {
     modules: event.modules,
     assignments: event.assignments,
     availabilityResponses: event.availabilityResponses,
-    roster
+    roster: [...roster, ...pendingRosterEntries]
   };
 };
 
