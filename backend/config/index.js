@@ -14,7 +14,13 @@ const envSchema = z.object({
   PORT: z.coerce.number().default(4000),
   API_PREFIX: z.string().default("/api/v1"),
   APP_NAME: z.string().default("Flourish Hub Backend"),
-  CLIENT_URL: z.string().default("http://localhost:3000"),
+  // .trim() matters here specifically: a stray trailing space on this var in
+  // the Render dashboard (easy to introduce via copy-paste, invisible in the
+  // UI's text input) got concatenated straight into password-reset links
+  // (`${CLIENT_URL}/reset-password?...`) — the space became a literal %20
+  // inside the hostname when a student clicked the link, breaking DNS
+  // resolution entirely and locking them out of self-service password reset.
+  CLIENT_URL: z.string().trim().default("http://localhost:3000"),
   CLIENT_URLS: z
     .string()
     .optional()

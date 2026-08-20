@@ -3,6 +3,7 @@ import { StatusCodes } from "http-status-codes";
 import crypto from "node:crypto";
 
 import { prisma } from "../database/prisma.js";
+import { env } from "../config/index.js";
 import { ApiError } from "../utils/ApiError.js";
 import {
   signAccessToken,
@@ -380,8 +381,7 @@ export const forgotPassword = async (email) => {
     }
   });
 
-  const clientUrl = process.env.CLIENT_URL || 'https://flourishing-hub-frontend2.vercel.app';
-  const resetLink = `${clientUrl}/reset-password?token=${resetToken}&userId=${user.id}`;
+  const resetLink = `${env.CLIENT_URL}/reset-password?token=${resetToken}&userId=${user.id}`;
 
   const { sendPasswordResetEmail } = await import('./email.service.js');
   await sendPasswordResetEmail(user.email, user.name, resetLink).catch(err =>

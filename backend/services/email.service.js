@@ -1,6 +1,7 @@
 import nodemailer from "nodemailer";
 import { ApiError } from "../utils/ApiError.js";
 import { StatusCodes } from "http-status-codes";
+import { env } from "../config/index.js";
 
 // Temporary Gmail-SMTP load control: only OTP verification and password-reset
 // emails are load-bearing for account access, so every other send*Email
@@ -307,7 +308,7 @@ export const sendApprovalEmail = async (email, name) => {
                 <li>Community engagement opportunities</li>
               </ul>
               
-              <a href="${process.env.CLIENT_URL || 'https://flourishing-hub-frontend2.vercel.app'}/login" class="button">Login Now</a>
+              <a href="${env.CLIENT_URL}/login" class="button">Login Now</a>
               
               <p>We're excited to have you on this journey of growth and well-being.</p>
               
