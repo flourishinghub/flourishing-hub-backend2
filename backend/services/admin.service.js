@@ -770,6 +770,41 @@ export const getWorkshopAnalyticsTable = async () => {
     (pendingByEvent[p.eventId] ||= []).push(p);
   }
 
+  // Batch CSV members with no account who never signed the physical sheet
+  // either — no EventRegistration (no account to register with) and no
+  // PendingAttendance (that's only created for a PRESENT no-account signer,
+  // see above). Without this, a genuinely absent no-account student from
+  // mam's CSV upload is invisible everywhere in this table: not a
+  // registration, not a pending-present row, nothing. Cross-referenced by
+  // (courseModuleId, batch) since that's the CSV upload's own scoping.
+  const anyPendingRows = await prisma.pendingAttendance.findMany({
+    where: { eventId: { in: events.map(e => e.id) } },
+    select: { eventId: true, rollNumber: true }
+  });
+  const pendingRollsByEvent = {};
+  for (const p of anyPendingRows) {
+    (pendingRollsByEvent[p.eventId] ||= new Set()).add(p.rollNumber.toUpperCase());
+  }
+
+  const batchScopedEvents = events.filter(e => e.courseModuleId && e.batch);
+  const csvRows = batchScopedEvents.length
+    ? await prisma.batchAssignment.findMany({
+        where: {
+          isMatched: false,
+          OR: batchScopedEvents.map(e => ({
+            courseModuleId: e.courseModuleId,
+            batchCode: { equals: e.batch, mode: "insensitive" }
+          }))
+        },
+        select: { courseModuleId: true, batchCode: true, rollNumber: true, name: true, email: true }
+      })
+    : [];
+  const csvByModuleBatch = {};
+  for (const r of csvRows) {
+    const key = `${r.courseModuleId}::${r.batchCode.toUpperCase()}`;
+    (csvByModuleBatch[key] ||= []).push(r);
+  }
+
   return events.map(event => {
     // Build lookup maps
     const attendanceMap = {};
@@ -858,6 +893,32 @@ export const getWorkshopAnalyticsTable = async () => {
       isPending: true
     }));
     students.push(...pendingStudents);
+
+    const csvAbsentKey = event.courseModuleId && event.batch
+      ? `${event.courseModuleId}::${event.batch.toUpperCase()}`
+      : null;
+    const alreadySignedRolls = pendingRollsByEvent[event.id] || new Set();
+    const csvAbsentStudents = (csvByModuleBatch[csvAbsentKey] || [])
+      .filter(r => !alreadySignedRolls.has(r.rollNumber.toUpperCase()))
+      .map(r => ({
+        userId: null,
+        name: r.name || "—",
+        email: r.email || "—",
+        rollNo: r.rollNumber || "—",
+        batch: event.batch || "—",
+        department: null,
+        programme: null,
+        attendanceStatus: "NOT_MARKED",
+        hasCheckedIn: false,
+        quizCompleted: false,
+        score: null,
+        maxScore: null,
+        quizScore: null,
+        rating: null,
+        registrationStatus: null,
+        isPending: true
+      }));
+    students.push(...csvAbsentStudents);
 
     const instructor = event.assignments.find(a => a.role === "INSTRUCTOR");
     const associateInstructor = event.assignments.find(a => a.role === "ASSOCIATE_INSTRUCTOR");
