@@ -759,4 +759,14 @@ model BatchAssignment {
   @@index([isMatched])
   @@index([courseId])
   @@index([courseModuleId])
+  // DB-level backstop against the duplicate-row bug: uploadBatchAssignment's
+  // dedup logic (see batchAssignment.service.js) is check-then-write in app
+  // code with no locking, so two near-simultaneous upload requests for the
+  // same file (double-click, retry on a slow connection) each see "no
+  // existing row yet" and both INSERT — silently doubling every student in
+  // that batch. Postgres treats NULLs as distinct, so this only constrains
+  // rows that have both a module and a roll number (the real-world case that
+  // broke); it's not a substitute for fixing the race in application code,
+  // just a guarantee the DB itself won't end up holding true duplicates.
+  @@unique([courseModuleId, batchCode, rollNumber])
 }
