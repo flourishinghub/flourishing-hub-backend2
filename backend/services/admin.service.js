@@ -903,7 +903,11 @@ export const getWorkshopAnalyticsTable = async () => {
       .map(r => ({
         userId: null,
         name: r.name || "—",
-        email: r.email || "—",
+        // BatchAssignment.email is routinely null (mam's CSV upload usually
+        // only has roll+name) — fall back to the standard IITB LDAP address,
+        // same convention already used when a PendingAttendance row is
+        // created for a present-but-no-account signer.
+        email: r.email || (r.rollNumber ? `${r.rollNumber.toLowerCase()}@iitb.ac.in` : "—"),
         rollNo: r.rollNumber || "—",
         batch: event.batch || "—",
         department: null,
