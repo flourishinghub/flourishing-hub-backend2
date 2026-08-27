@@ -145,13 +145,14 @@ export const registerForEvent = async ({ eventId, asVolunteer }, user) => {
   return registration;
 };
 
-export const listMyRegistrations = async (userId) =>
-  prisma.eventRegistration.findMany({
+export const listMyRegistrations = async (userId) => {
+  const registrations = await prisma.eventRegistration.findMany({
     where: { userId },
     include: {
       event: {
         include: {
-          modules: true
+          modules: true,
+          checkIns: { where: { userId }, select: { status: true } }
         }
       }
     },
@@ -159,6 +160,16 @@ export const listMyRegistrations = async (userId) =>
       registeredAt: "desc"
     }
   });
+
+  // A self check-in sits at PENDING until staff verifies it — until then
+  // there's no AttendanceRecord, so the student's own dashboard couldn't
+  // tell "verification pending" apart from "never showed up", showing both
+  // as "Not Attended". Surface the distinction explicitly.
+  return registrations.map((reg) => ({
+    ...reg,
+    verificationPending: reg.status !== "ATTENDED" && reg.event.checkIns.some((c) => c.status === "PENDING")
+  }));
+};
 
 
 
