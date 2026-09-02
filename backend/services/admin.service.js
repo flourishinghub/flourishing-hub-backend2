@@ -9,6 +9,20 @@ import { sendStaffAssignmentEmail } from "./email.service.js";
 // Statuses that no longer occupy a seat — excluded from "occupied seat" / capacity counts.
 const INACTIVE_REGISTRATION_STATUSES = ["CANCELLED", "NO_SHOW", "WAITLISTED"];
 
+// AttendanceRecord.source prefixes that mean "this came from reconciling a
+// physical sign-in sheet against a WhatsApp photo/CSV", covering both the
+// new "PHYSICAL_SHEET" toggle tag (WorkshopFilterView) and every descriptive
+// source string written by hand during manual sheet reconciliation
+// ("SHEET_RECONCILIATION: signed D3 ... sheet", "PHYSICAL_SHEET_17082026",
+// "sign-in-sheet-import"). Matched by prefix, not exact equality, since the
+// descriptive ones always carry sheet-specific detail after the tag.
+const PHYSICAL_SHEET_SOURCE_PREFIXES = ["SHEET_RECONCILIATION", "PHYSICAL_SHEET"];
+const isPhysicalSheetSource = (source) => {
+  if (!source) return false;
+  if (source === "sign-in-sheet-import") return true;
+  return PHYSICAL_SHEET_SOURCE_PREFIXES.some((p) => source.startsWith(p));
+};
+
 // CREATE EVENT
 export const createEvent = async (eventData, createdById) => {
   try {
@@ -813,14 +827,12 @@ export const getWorkshopAnalyticsTable = async () => {
     const physicalSheetMap = {};
     event.attendances.forEach(a => {
       attendanceMap[a.userId] = a.status;
-      // "PHYSICAL_SHEET" is the source tag used whenever attendance is set
-      // from a physical sign-in sheet (see WorkshopFilterView's "mark from
-      // physical sheet" toggle) — kept separate from attendanceStatus so
-      // analytics can show what the sheet said independently of what the
-      // app's self-check-in said, per the reconciliation rule: a physical
-      // sheet signature is Present regardless of check-in state, and its
-      // absence is Absent regardless of check-in state.
-      if (a.source === "PHYSICAL_SHEET") physicalSheetMap[a.userId] = a.status;
+      // Kept separate from attendanceStatus so analytics can show what the
+      // sheet said independently of what the app's self-check-in said, per
+      // the reconciliation rule: a physical sheet signature is Present
+      // regardless of check-in state, and its absence is Absent regardless
+      // of check-in state.
+      if (isPhysicalSheetSource(a.source)) physicalSheetMap[a.userId] = a.status;
     });
 
     // Most recent check-in per user wins (event.checkIns is already ordered
