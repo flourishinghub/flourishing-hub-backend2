@@ -141,6 +141,26 @@ model User {
   importJobs         ImportJob[]        @relation("ImportCreatedBy")
   emailVerifications EmailVerification[]
   notifications      Notification[]
+  linkedCredentials  LinkedCredential[]
+}
+
+// A second (or third...) email+password pair that logs into the SAME
+// underlying User account rather than creating a separate one — e.g. an
+// admin account shared by multiple staff members, each with their own
+// login email and password, but all operating as the one account. Kept as
+// its own row (not fields on User) so each credential's password can be
+// reset independently without touching the primary User.passwordHash or
+// any other linked credential.
+model LinkedCredential {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([userId])
 }
 
 model StudentProfile {
@@ -522,6 +542,11 @@ model EmailVerification {
   isUsed             Boolean   @default(false)
   createdAt          DateTime  @default(now())
   user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Set only for a password-reset requested via a LinkedCredential's email —
+  // tells resetPassword to update that credential's own passwordHash instead
+  // of the primary User.passwordHash. Null for every other use of this table
+  // (signup OTPs, a primary-email password reset).
+  linkedCredentialId String?
 
   @@index([userId, expiresAt])
   @@index([otp, isUsed])

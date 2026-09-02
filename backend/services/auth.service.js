@@ -313,8 +313,9 @@ const passwordHash = await bcrypt.hash(payload.password, 10);
 };
 
 export const login = async ({ email, password }) => {
-  const user = await prisma.user.findUnique({
-    where: { email: email.toLowerCase() },
+  const normalizedEmail = email.toLowerCase();
+  let user = await prisma.user.findUnique({
+    where: { email: normalizedEmail },
     include: {
       studentProfile: true,
       instructorProfile: true,
@@ -322,11 +323,26 @@ export const login = async ({ email, password }) => {
     }
   });
 
+  // Not a primary account email — check whether it's a LinkedCredential
+  // (a second email+password pair sharing someone else's account, e.g. a
+  // shared admin account used by multiple staff members).
+  let credentialPasswordHash = user?.passwordHash;
+  if (!user) {
+    const linked = await prisma.linkedCredential.findUnique({ where: { email: normalizedEmail } });
+    if (linked) {
+      user = await prisma.user.findUnique({
+        where: { id: linked.userId },
+        include: { studentProfile: true, instructorProfile: true, adminProfile: true }
+      });
+      credentialPasswordHash = linked.passwordHash;
+    }
+  }
+
   if (!user) {
     throw new ApiError(StatusCodes.UNAUTHORIZED, "Invalid credentials");
   }
 
-  const validPassword = await bcrypt.compare(password, user.passwordHash);
+  const validPassword = await bcrypt.compare(password, credentialPasswordHash);
 
   if (!validPassword) {
     throw new ApiError(StatusCodes.UNAUTHORIZED, "Invalid credentials");
@@ -365,26 +381,45 @@ export const login = async ({ email, password }) => {
 };
 
 export const forgotPassword = async (email) => {
-  const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+  const normalizedEmail = email.toLowerCase();
+  const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+
+  let targetUserId = user?.id;
+  let linkedCredentialId = null;
+  let recipientEmail = user?.email;
+  let recipientName = user?.name;
+
   if (!user) {
-    // Don't reveal if email exists
-    return { message: "If that email is registered, you'll receive a reset link shortly." };
+    // Not a primary account email — maybe it's a LinkedCredential's email.
+    const linked = await prisma.linkedCredential.findUnique({
+      where: { email: normalizedEmail },
+      include: { user: { select: { id: true, name: true } } }
+    });
+    if (!linked) {
+      // Don't reveal whether the email exists either way
+      return { message: "If that email is registered, you'll receive a reset link shortly." };
+    }
+    targetUserId = linked.userId;
+    linkedCredentialId = linked.id;
+    recipientEmail = normalizedEmail;
+    recipientName = linked.user.name;
   }
 
   const resetToken = crypto.randomBytes(32).toString('hex');
 
   await prisma.emailVerification.create({
     data: {
-      userId: user.id,
+      userId: targetUserId,
       otp: resetToken,
       expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+      linkedCredentialId
     }
   });
 
-  const resetLink = `${env.CLIENT_URL}/reset-password?token=${resetToken}&userId=${user.id}`;
+  const resetLink = `${env.CLIENT_URL}/reset-password?token=${resetToken}&userId=${targetUserId}`;
 
   const { sendPasswordResetEmail } = await import('./email.service.js');
-  await sendPasswordResetEmail(user.email, user.name, resetLink).catch(err =>
+  await sendPasswordResetEmail(recipientEmail, recipientName, resetLink).catch(err =>
     console.error("Failed to send password reset email:", err)
   );
 
@@ -407,8 +442,15 @@ export const resetPassword = async (userId, token, newPassword) => {
 
   const passwordHash = await bcrypt.hash(newPassword, 10);
 
+  // A LinkedCredential's password lives on its own row — resetting it must
+  // never touch the primary User.passwordHash or any other linked email
+  // sharing this same account.
+  const updates = record.linkedCredentialId
+    ? [prisma.linkedCredential.update({ where: { id: record.linkedCredentialId }, data: { passwordHash } })]
+    : [prisma.user.update({ where: { id: userId }, data: { passwordHash } })];
+
   await prisma.$transaction([
-    prisma.user.update({ where: { id: userId }, data: { passwordHash } }),
+    ...updates,
     prisma.emailVerification.update({ where: { id: record.id }, data: { isUsed: true } }),
     prisma.refreshToken.updateMany({ where: { userId }, data: { revokedAt: new Date() } }),
   ]);
