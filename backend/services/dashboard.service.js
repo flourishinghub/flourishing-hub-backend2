@@ -724,7 +724,7 @@ export const getAdminDashboardData = async () => {
 
 // STUDENT BUNDLE PROGRESS API
 export const getStudentBundleProgress = async (userId) => {
-  const [courses, attendedByEvent, attendedByReg, myRegistrations] = await Promise.all([
+  const [courses, attendedByEvent, attendedByReg, myRegistrations, pendingCheckIns] = await Promise.all([
     prisma.course.findMany({
       where: { status: "ACTIVE" },
       include: {
@@ -758,6 +758,16 @@ export const getStudentBundleProgress = async (userId) => {
       where: { userId, status: { not: "CANCELLED" } },
       select: { eventId: true },
     }),
+    // A self check-in sits at PENDING until staff verifies it — with no
+    // AttendanceRecord yet, such a workshop used to render as a plain
+    // "not attended" square here, same blind spot the home page's
+    // Registered Courses list had before verificationPending was added
+    // there. Surface it the same way instead of looking indistinguishable
+    // from a genuine no-show.
+    prisma.eventCheckIn.findMany({
+      where: { userId, status: "PENDING" },
+      select: { eventId: true },
+    }),
   ]);
 
   const attendedIds = new Set([
@@ -765,6 +775,9 @@ export const getStudentBundleProgress = async (userId) => {
     ...attendedByReg.map((r) => r.eventId),
   ]);
   const registeredEventIds = new Set(myRegistrations.map((r) => r.eventId));
+  const pendingVerificationIds = new Set(
+    pendingCheckIns.map((c) => c.eventId).filter((id) => !attendedIds.has(id))
+  );
 
   return courses
     .map((course) => {
@@ -777,6 +790,7 @@ export const getStudentBundleProgress = async (userId) => {
       if (myWorkshops.length === 0) return null;
 
       const attended = myWorkshops.filter((e) => attendedIds.has(e.id)).length;
+      const pendingVerification = myWorkshops.filter((e) => pendingVerificationIds.has(e.id)).length;
 
       // Compulsory bundle courses: template modules with no scheduled event
       // yet for THIS student are still part of their bundle — surfaced as
@@ -841,6 +855,7 @@ export const getStudentBundleProgress = async (userId) => {
         isCompulsory: course.isCompulsory,
         totalWorkshops: total,
         attended,
+        pendingVerification,
         percentage: total > 0 ? Math.round((attended / total) * 100) : 0,
         pendingWorkshops,
       };
