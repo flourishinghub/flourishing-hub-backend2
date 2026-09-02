@@ -167,93 +167,6 @@ export const sendSessionCompletedNotices = async () => {
   }
 };
 
-// A check-in an instructor never reviewed (still PENDING) used to sit that
-// way forever — no attendance record, no resolution, indistinguishable from
-// "never checked in" once the session was long over. Auto-rejects any
-// check-in still PENDING 5 days+ after its event ended, so every session
-// eventually reaches a final state without needing a human to remember it.
-// 5 days (not 24h) because quiz/feedback no longer wait on attendance
-// verification to unlock (see isPastMidSession in operation.service.js) —
-// verification is purely a record-keeping/analytics step now, so staff get
-// a realistic window to work through it instead of a same-day deadline.
-const STALE_CHECKIN_GRACE_MS = 5 * 24 * 60 * 60 * 1000;
-
-export const autoRejectStaleCheckIns = async () => {
-  const cutoff = new Date(Date.now() - STALE_CHECKIN_GRACE_MS);
-
-  const staleCheckIns = await prisma.eventCheckIn.findMany({
-    where: {
-      status: "PENDING",
-      event: { endAt: { lt: cutoff } }
-    },
-    select: { id: true, userId: true, moduleId: true, event: { select: { id: true, title: true } } }
-  });
-
-  if (!staleCheckIns.length) return;
-
-  await prisma.eventCheckIn.updateMany({
-    where: { id: { in: staleCheckIns.map((c) => c.id) } },
-    data: { status: "REJECTED", note: "Auto-rejected: not reviewed within 5 days of session end" }
-  });
-
-  // The notification below tells the student this was "marked absent" — that
-  // used to be a lie: this loop only ever touched EventCheckIn, never wrote
-  // an AttendanceRecord, so the student stayed NOT_MARKED in analytics
-  // forever instead of ABSENT. Write the record that was already being
-  // promised.
-  //
-  // Never downgrade a record that's already PRESENT, though — this stale
-  // PENDING check-in is just one self-check-in ATTEMPT that never got
-  // reviewed; if attendance for this student was separately, legitimately
-  // already confirmed PRESENT (an instructor verified a different check-in,
-  // a manual/bulk attendance correction, etc.), that fact is real and this
-  // loop has no business overwriting it. Blindly doing so was a real
-  // production bug (found 2026-08-11): it silently flipped 102 already-PRESENT
-  // students back to ABSENT across 7 MTC batches whose real attendance had
-  // been reconciled from physical sign-in sheets after they'd separately
-  // self-check-in'd (and never got verified) in the app.
-  const downgraded = [];
-  for (const checkIn of staleCheckIns) {
-    const existingAttendance = await prisma.attendanceRecord.findFirst({
-      where: { eventId: checkIn.event.id, userId: checkIn.userId, moduleId: checkIn.moduleId || null }
-    });
-    if (existingAttendance) {
-      if (existingAttendance.status === "PRESENT") continue;
-      await prisma.attendanceRecord.update({
-        where: { id: existingAttendance.id },
-        data: { status: "ABSENT", source: "AUTO_REJECT_STALE_CHECKIN", markedAt: new Date() }
-      });
-    } else {
-      await prisma.attendanceRecord.create({
-        data: {
-          eventId: checkIn.event.id,
-          moduleId: checkIn.moduleId,
-          userId: checkIn.userId,
-          status: "ABSENT",
-          source: "AUTO_REJECT_STALE_CHECKIN",
-          markedAt: new Date()
-        }
-      });
-    }
-    downgraded.push(checkIn);
-  }
-
-  // Only the students actually marked absent above get the "marked absent"
-  // notice — someone whose already-PRESENT record was left alone shouldn't
-  // be told otherwise.
-  for (const checkIn of downgraded) {
-    await createNotificationsForUsers(
-      [checkIn.userId],
-      "warning",
-      "Check-In Not Verified",
-      `Your check-in for "${checkIn.event.title}" wasn't verified by the instructor in time and has been marked absent. Contact your instructor if this is a mistake.`,
-      checkIn.event.id
-    ).catch(() => {});
-  }
-
-  console.log(`[auto-reject-checkins] Resolved ${staleCheckIns.length} stale PENDING check-in(s)`);
-};
-
 // Runs every hour at minute 0, plus a dedicated daily run at 8:00 AM IST
 // (02:30 UTC) for the same-day morning reminder.
 export const startReminderCron = () => {
@@ -265,12 +178,6 @@ export const startReminderCron = () => {
       await sendRemindersForWindow(55 * 60 * 1000, 65 * 60 * 1000, "in 1 hour", "reminder1hSentAt");
     } catch (err) {
       console.error("Reminder cron error:", err);
-    }
-
-    try {
-      await autoRejectStaleCheckIns();
-    } catch (err) {
-      console.error("Auto-reject stale check-ins cron error:", err);
     }
   });
 
@@ -297,5 +204,5 @@ export const startReminderCron = () => {
     }
   });
 
-  console.log("Reminder cron job started (runs every hour — 24h & 1h reminders + stale check-in auto-reject — plus a daily 8:00 AM IST same-day reminder — plus a per-minute session-completed check)");
+  console.log("Reminder cron job started (runs every hour — 24h & 1h reminders — plus a daily 8:00 AM IST same-day reminder — plus a per-minute session-completed check)");
 };

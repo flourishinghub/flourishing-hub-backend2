@@ -733,15 +733,17 @@ export const getWorkshopAnalyticsTable = async () => {
         }
       },
       attendances: {
-        select: { status: true, userId: true }
+        select: { status: true, userId: true, source: true }
       },
-      // PENDING/VERIFIED check-ins — needed to tell "checked in, awaiting
-      // instructor review" apart from "never checked in at all". Both cases
-      // have no AttendanceRecord and so are indistinguishable via
-      // attendances alone (both fall back to NOT_MARKED below).
+      // Every check-in regardless of status (not just PENDING/VERIFIED) —
+      // needed both to tell "checked in, awaiting instructor review" apart
+      // from "never checked in at all" (both otherwise fall back to
+      // NOT_MARKED via attendances alone) and to surface the raw check-in
+      // status as its own analytics column. Ordered so the most recent
+      // check-in per user wins when a user has more than one for this event.
       checkIns: {
-        where: { status: { in: ["PENDING", "VERIFIED"] } },
-        select: { userId: true }
+        select: { userId: true, status: true, checkedInAt: true },
+        orderBy: { checkedInAt: "desc" }
       },
       feedbackEntries: { select: { eventRating: true, userId: true } },
       modules: {
@@ -808,9 +810,36 @@ export const getWorkshopAnalyticsTable = async () => {
   return events.map(event => {
     // Build lookup maps
     const attendanceMap = {};
-    event.attendances.forEach(a => { attendanceMap[a.userId] = a.status; });
+    const physicalSheetMap = {};
+    event.attendances.forEach(a => {
+      attendanceMap[a.userId] = a.status;
+      // "PHYSICAL_SHEET" is the source tag used whenever attendance is set
+      // from a physical sign-in sheet (see WorkshopFilterView's "mark from
+      // physical sheet" toggle) — kept separate from attendanceStatus so
+      // analytics can show what the sheet said independently of what the
+      // app's self-check-in said, per the reconciliation rule: a physical
+      // sheet signature is Present regardless of check-in state, and its
+      // absence is Absent regardless of check-in state.
+      if (a.source === "PHYSICAL_SHEET") physicalSheetMap[a.userId] = a.status;
+    });
 
-    const checkedInUserIds = new Set(event.checkIns.map(c => c.userId));
+    // Most recent check-in per user wins (event.checkIns is already ordered
+    // by checkedInAt desc) — a user with more than one check-in for this
+    // event only gets counted once.
+    const checkInStatusMap = {};
+    event.checkIns.forEach(c => {
+      if (!(c.userId in checkInStatusMap)) checkInStatusMap[c.userId] = c.status;
+    });
+    const checkedInUserIds = new Set(
+      Object.entries(checkInStatusMap).filter(([, status]) => status === "PENDING" || status === "VERIFIED").map(([userId]) => userId)
+    );
+    const toCheckInDisplayStatus = (userId) => {
+      const status = checkInStatusMap[userId];
+      if (status === "PENDING") return "CHECKED_IN_PENDING";
+      if (status === "VERIFIED") return "CHECKED_IN_VERIFIED";
+      if (status === "REJECTED") return "CHECKED_IN_REJECTED";
+      return "NOT_CHECKED_IN";
+    };
 
     const feedbackMap = {};
     event.feedbackEntries.forEach(f => { feedbackMap[f.userId] = f.eventRating; });
@@ -862,6 +891,8 @@ export const getWorkshopAnalyticsTable = async () => {
         programme: reg.user.studentProfile?.programme || null,
         attendanceStatus: attendanceMap[reg.userId] || "NOT_MARKED",
         hasCheckedIn: checkedInUserIds.has(reg.userId),
+        checkInStatus: toCheckInDisplayStatus(reg.userId),
+        physicalSheetStatus: physicalSheetMap[reg.userId] ?? null,
         quizCompleted: progress?.completed || false,
         score: progress?.marks ?? null,
         maxScore: progress?.maxMarks ?? null,
@@ -884,6 +915,8 @@ export const getWorkshopAnalyticsTable = async () => {
       programme: null,
       attendanceStatus: "PRESENT",
       hasCheckedIn: true,
+      checkInStatus: "NOT_CHECKED_IN",
+      physicalSheetStatus: "PRESENT",
       quizCompleted: false,
       score: null,
       maxScore: null,
@@ -914,6 +947,13 @@ export const getWorkshopAnalyticsTable = async () => {
         programme: null,
         attendanceStatus: "NOT_MARKED",
         hasCheckedIn: false,
+        checkInStatus: "NOT_CHECKED_IN",
+        // Unknown, not "ABSENT" — this roster row only proves mam's CSV
+        // expected this student for the batch, not that a physical sheet was
+        // actually collected for this specific session. Final attendance
+        // status still resolves to Absent via the standard NOT_MARKED +
+        // not-checked-in fallback, without asserting sheet data we don't have.
+        physicalSheetStatus: null,
         quizCompleted: false,
         score: null,
         maxScore: null,
