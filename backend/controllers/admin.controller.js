@@ -31,6 +31,7 @@ import {
   linkEventFeedback
 } from "../services/admin.service.js";
 import { generateStudentResponseExportBuffer } from "../services/studentResponseExport.service.js";
+import { importTopicQuizScores } from "../services/quizScoreImport.service.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 
@@ -515,4 +516,20 @@ export const exportStudentResponsesController = asyncHandler(async (req, res) =>
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
   res.status(StatusCodes.OK).send(buffer);
+});
+
+// UPLOAD TOPIC-WISE (GOOGLE FORM) QUIZ SCORE SHEET
+// Additive — lands each student's score in ModuleProgress via
+// quizScoreImport.service.js. Does not touch Result / in-built-quiz logic.
+export const uploadTopicQuizScoresController = asyncHandler(async (req, res) => {
+  if (req.user.role !== "ADMIN") {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Admin role required");
+  }
+  const data = await importTopicQuizScores({
+    courseId: req.body.courseId,
+    topic: req.body.topic,
+    fileBuffer: req.file?.buffer,
+    fileName: req.file?.originalname
+  });
+  res.status(StatusCodes.OK).json({ success: true, message: "Quiz scores uploaded", data });
 });

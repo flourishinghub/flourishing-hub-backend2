@@ -30,9 +30,11 @@ import {
   saveEventQuizController,
   getEventFeedbackFormController,
   saveEventFeedbackFormController,
-  exportStudentResponsesController
+  exportStudentResponsesController,
+  uploadTopicQuizScoresController
 } from "../controllers/admin.controller.js";
 import { authenticate } from "../middleware/auth.js";
+import { spreadsheetUpload } from "../middleware/upload.js";
 import { validate } from "../middleware/validate.js";
 import { eventQuizSchema } from "../validators/quiz.validation.js";
 import { eventFeedbackFormSchema } from "../validators/feedback.validation.js";
@@ -99,3 +101,11 @@ adminRoutes.get("/courses/:courseId/staff", authenticate, getCourseStaffControll
 // Export Master Excel
 adminRoutes.get("/analytics/export-excel", authenticate, exportExcelController);
 adminRoutes.get("/analytics/export-student-responses", authenticate, exportStudentResponsesController);
+
+// Upload a topic-wise (Google Form) quiz score sheet — feeds the Score column
+adminRoutes.post(
+  "/analytics/quiz-scores",
+  authenticate,
+  spreadsheetUpload.single("file"),
+  uploadTopicQuizScoresController
+);
