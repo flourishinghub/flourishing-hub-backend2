@@ -1002,6 +1002,12 @@ export const getWorkshopAnalyticsTable = async () => {
       totalRegistered: event.registrations.length,
       totalAttended: present.length,
       totalAbsent: event.attendances.filter(a => a.status === "ABSENT").length,
+      // True once at least one attendance record for this event carries a
+      // physical-sign-in-sheet source (isPhysicalSheetSource) — i.e. a sheet
+      // photo has been reconciled. Drives the "Physical Sheet: Uploaded /
+      // Pending" column + filter in the Workshop-Level analytics view.
+      hasPhysicalSheet: Object.keys(physicalSheetMap).length > 0,
+      physicalSheetCount: Object.keys(physicalSheetMap).length,
       avgRating,
       students,
       // Backward compat
