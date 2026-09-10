@@ -1124,6 +1124,21 @@ export const generateExcelExport = async () => {
     })
   ]);
 
+  // No-account physical-sheet signers (PendingAttendance, status PRESENT) never have an
+  // EventRegistration row, so the `event.registrations` loops below never see them —
+  // unlike getWorkshopAnalyticsTable (the Analytics tab's data source), which surfaces
+  // them via its own pendingStudents rows. Fetched once, grouped by event, and appended
+  // into Sheet D below so a student marked Present from a physical sheet with no account
+  // yet shows up in this export too, instead of only in the Analytics dashboard.
+  const pendingPresentRows = await prisma.pendingAttendance.findMany({
+    where: { eventId: { in: events.map(e => e.id) }, status: "PRESENT" },
+    select: { eventId: true, name: true, rollNumber: true, email: true, source: true }
+  });
+  const pendingPresentByEvent = {};
+  for (const p of pendingPresentRows) {
+    (pendingPresentByEvent[p.eventId] ||= []).push(p);
+  }
+
   const fmtDate = (d) => d ? new Date(d).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : '—';
 
   // ─── Sheet A: Course-Level Summary ───
@@ -1299,6 +1314,27 @@ export const generateExcelExport = async () => {
         score: score != null ? `${score} / 5` : '—',
         rating: feedbackMap[reg.userId] != null ? feedbackMap[reg.userId] : '—',
         status: finalStatus,
+      });
+    }
+
+    // No-account signers: same Present row shape as above, minus anything that
+    // requires a real account (programme/dept/score/rating — all unknown pre-signup).
+    for (const p of pendingPresentByEvent[event.id] || []) {
+      sheetD.addRow({
+        name: p.name || '—',
+        roll: p.rollNumber || '—',
+        email: p.email || '—',
+        programme: '—',
+        dept: '—',
+        batch: event.batch || '—',
+        courseCode: event.course?.code || '—',
+        workshop: event.title,
+        date: fmtDate(event.startAt),
+        checkin: '—',
+        attendance: 'PRESENT',
+        score: '—',
+        rating: '—',
+        status: 'Present (no account yet)',
       });
     }
   }
