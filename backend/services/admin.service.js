@@ -799,6 +799,7 @@ export const getWorkshopAnalyticsTable = async () => {
   });
   const pendingRollsByEvent = {};
   for (const p of anyPendingRows) {
+    if (!p.rollNumber) continue; // a present no-account signer can be recorded with roll unknown (illegible sheet, etc.)
     (pendingRollsByEvent[p.eventId] ||= new Set()).add(p.rollNumber.toUpperCase());
   }
 
@@ -944,7 +945,7 @@ export const getWorkshopAnalyticsTable = async () => {
       : null;
     const alreadySignedRolls = pendingRollsByEvent[event.id] || new Set();
     const csvAbsentStudents = (csvByModuleBatch[csvAbsentKey] || [])
-      .filter(r => !alreadySignedRolls.has(r.rollNumber.toUpperCase()))
+      .filter(r => !(r.rollNumber && alreadySignedRolls.has(r.rollNumber.toUpperCase())))
       .map(r => ({
         userId: null,
         name: r.name || "—",
