@@ -982,6 +982,14 @@ export const getWorkshopAnalyticsTable = async () => {
     const volunteers = event.assignments.filter(a => a.role === "VOLUNTEER");
 
     const present = students.filter(s => s.attendanceStatus === "PRESENT");
+    // "Absent" is never written as a literal AttendanceRecord status by this
+    // project's reconciliation flows (they only ever write PRESENT records,
+    // see docs/attendance-reconciliation-guide.md) — a genuinely absent
+    // student's attendanceStatus stays "NOT_MARKED" forever. Filtering on a
+    // literal "ABSENT" status here always returned 0/empty, even when the
+    // per-row "FINAL ATTENDANCE" column (derived with this same NOT_MARKED +
+    // not-checked-in fallback, see the guide's Step 6) showed real absentees.
+    const absent = students.filter(s => s.attendanceStatus === "NOT_MARKED" && !s.hasCheckedIn);
     const ratings = event.feedbackEntries.map(f => f.eventRating).filter(Boolean);
     const avgRating = ratings.length ? (ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1) : null;
 
@@ -1002,7 +1010,7 @@ export const getWorkshopAnalyticsTable = async () => {
       venue: event.venue || "—",
       totalRegistered: event.registrations.length,
       totalAttended: present.length,
-      totalAbsent: event.attendances.filter(a => a.status === "ABSENT").length,
+      totalAbsent: absent.length,
       // True once at least one attendance record for this event carries a
       // physical-sign-in-sheet source (isPhysicalSheetSource) — i.e. a sheet
       // photo has been reconciled. Drives the "Physical Sheet: Uploaded /
@@ -1013,7 +1021,7 @@ export const getWorkshopAnalyticsTable = async () => {
       students,
       // Backward compat
       presentStudents: present.map(s => ({ name: s.name, email: s.email, rollNo: s.rollNo })),
-      absentStudents: students.filter(s => s.attendanceStatus === "ABSENT").map(s => ({ name: s.name, email: s.email, rollNo: s.rollNo })),
+      absentStudents: absent.map(s => ({ name: s.name, email: s.email, rollNo: s.rollNo })),
       allRegistrants: students.map(s => ({ name: s.name, email: s.email, rollNo: s.rollNo, status: s.registrationStatus }))
     };
   });
