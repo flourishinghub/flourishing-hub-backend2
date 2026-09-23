@@ -50,13 +50,11 @@ export const registerForEvent = async ({ eventId, asVolunteer }, user) => {
     }
   }
 
-  // Registration stays open until 15 minutes after the event starts, then closes.
-  const REGISTRATION_GRACE_MS = 15 * 60 * 1000;
-  const registrationDeadline = new Date(new Date(event.startAt).getTime() + REGISTRATION_GRACE_MS);
-  if (new Date() > registrationDeadline) {
-    throw new ApiError(StatusCodes.BAD_REQUEST, "Registration for this event has closed");
-  }
-
+  // No implicit event-start-based cutoff — a student can register at any time
+  // right up to (and after) the event's start, as long as the event is still
+  // PUBLISHED and any admin-set registrationOpensAt/registrationClosesAt
+  // window (checked below) allows it. Removed the old hardcoded "closes 15
+  // minutes after start" rule per explicit request (2026-09-23).
   if (event.registrationClosesAt && event.registrationClosesAt < new Date()) {
     throw new ApiError(StatusCodes.BAD_REQUEST, "Registration for this event has closed");
   }
