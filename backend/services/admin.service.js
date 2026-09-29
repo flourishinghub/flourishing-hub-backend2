@@ -1005,14 +1005,16 @@ export const getWorkshopAnalyticsTable = async () => {
     const associateStaff = staffDirectory(rawStaffName(event, "ASSOCIATE_INSTRUCTOR"));
 
     const present = students.filter(s => s.attendanceStatus === "PRESENT");
-    // "Absent" is never written as a literal AttendanceRecord status by this
-    // project's reconciliation flows (they only ever write PRESENT records,
-    // see docs/attendance-reconciliation-guide.md) — a genuinely absent
-    // student's attendanceStatus stays "NOT_MARKED" forever. Filtering on a
-    // literal "ABSENT" status here always returned 0/empty, even when the
-    // per-row "FINAL ATTENDANCE" column (derived with this same NOT_MARKED +
-    // not-checked-in fallback, see the guide's Step 6) showed real absentees.
-    const absent = students.filter(s => s.attendanceStatus === "NOT_MARKED" && !s.hasCheckedIn);
+    // Reconciliation flows almost never write a literal "ABSENT" record (see
+    // docs/attendance-reconciliation-guide.md) — a genuinely absent student's
+    // attendanceStatus usually stays "NOT_MARKED", so that + not-checked-in is
+    // counted as absent (same fallback as the per-row "FINAL ATTENDANCE"
+    // column). The few explicit ABSENT records (a staff "Mark Absent", or the
+    // stale-check-in auto-reject cron) count too — the frontend's student
+    // views already treat them as absent, so this card must as well.
+    const absent = students.filter(s =>
+      s.attendanceStatus === "ABSENT" || (s.attendanceStatus === "NOT_MARKED" && !s.hasCheckedIn)
+    );
     const ratings = event.feedbackEntries.map(f => f.eventRating).filter(Boolean);
     const avgRating = ratings.length ? (ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1) : null;
 
