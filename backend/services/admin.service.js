@@ -1009,9 +1009,10 @@ export const getWorkshopAnalyticsTable = async () => {
     // docs/attendance-reconciliation-guide.md) — a genuinely absent student's
     // attendanceStatus usually stays "NOT_MARKED", so that + not-checked-in is
     // counted as absent (same fallback as the per-row "FINAL ATTENDANCE"
-    // column). The few explicit ABSENT records (a staff "Mark Absent", or the
-    // stale-check-in auto-reject cron) count too — the frontend's student
-    // views already treat them as absent, so this card must as well.
+    // column). The few explicit ABSENT records (a staff "Mark Absent", or ones
+    // left by the stale-check-in auto-reject cron before fb3b3e0 removed it)
+    // count too — the frontend's student views already treat them as absent,
+    // so this card must as well.
     const absent = students.filter(s =>
       s.attendanceStatus === "ABSENT" || (s.attendanceStatus === "NOT_MARKED" && !s.hasCheckedIn)
     );
