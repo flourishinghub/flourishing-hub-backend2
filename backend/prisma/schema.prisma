@@ -284,6 +284,11 @@ model Event {
   // Direct link to a reusable Feedback-library form (see FeedbackForm model
   // below) — same standalone-only/inherit-from-module rule as quizId.
   feedbackFormId        String?
+  // Full name (as typed/imported) of a facilitator with no platform account,
+  // so no EventStaffAssignment can exist for them. An assigned account always
+  // wins over this; display is reduced to a first name by utils/staffName.js.
+  instructorName          String?
+  associateInstructorName String?
   completionEmailSentAt DateTime?
   reminder24hSentAt     DateTime?
   reminder1hSentAt      DateTime?

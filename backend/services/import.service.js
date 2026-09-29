@@ -252,10 +252,12 @@ const mapScheduleRowToEventPayload = (row, meta = {}) => {
     // when the whole file is one batch); leaving it blank falls back to each row's
     // own "tutorial/batch" column, so a single file can mix multiple batches.
     batch: normalizeString(meta.batchCode) || tutorial || undefined,
-    // Not consumed by createEvent directly — carried through so the preview
-    // table can show it, and so importEvents can resolve it to a real
-    // EventStaffAssignment by matching against registered instructor accounts.
+    // Carried through so the preview table can show it, and so importEvents
+    // can resolve it to a real EventStaffAssignment by matching against
+    // registered instructor accounts. createEvent keeps the typed name
+    // (instructorName / associateInstructorName) only when that match fails.
     instructor: instructor || undefined,
+    instructorName: instructor || undefined,
     associateInstructorName: associateInstructor || undefined,
   };
 };
@@ -305,10 +307,12 @@ const mapScheduleRowWithModule = (row, module, meta = {}) => {
     courseModuleId: meta.courseModuleId || undefined,
     registrationMode: meta.workshopType === 'compulsory' ? 'COMPULSORY' : undefined,
     batch: normalizeString(meta.batchCode) || batch || undefined,
-    // Not consumed by createEvent directly — carried through so the preview
-    // table can show it, and so importEvents can resolve it to a real
-    // EventStaffAssignment by matching against registered instructor accounts.
+    // Carried through so the preview table can show it, and so importEvents
+    // can resolve it to a real EventStaffAssignment by matching against
+    // registered instructor accounts. createEvent keeps the typed name
+    // (instructorName / associateInstructorName) only when that match fails.
     instructor: instructor || undefined,
+    instructorName: instructor || undefined,
     associateInstructorName: associateInstructor || undefined,
     isCampusWide: true,
     allowVolunteerSignup: true,

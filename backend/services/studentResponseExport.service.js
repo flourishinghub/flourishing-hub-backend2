@@ -20,6 +20,7 @@
 // still work for every submission since those come from ModuleProgress.
 import { prisma } from "../database/prisma.js";
 import { createWorkbookBuffer } from "../utils/excel.js";
+import { loadStaffDirectory, rawStaffName } from "../utils/staffName.js";
 
 const QUIZ_PASS_THRESHOLD = 4; // out of 10 — same threshold used by admin analytics' Pass/Fail (filterUtils.ts computeModuleStatus)
 
@@ -99,14 +100,16 @@ export const getStudentResponseExportRows = async (filters = {}) => {
   const intermediateRows = [];
   const quizQuestionLabels = new Map(); // questionId -> "Quiz Q1: ..." label, insertion order = column order
   const feedbackQuestionLabels = new Map(); // questionId -> "Feedback Q1: ..." label
+  // Same first-name display as the analytics Instructor filter, so the
+  // instructorName filter value picked there matches here.
+  const staffDirectory = await loadStaffDirectory(prisma);
 
   for (const event of events) {
     const topicTitle = event.courseModule?.title || event.title;
     if (topicName && topicTitle !== topicName) continue;
 
-    const instructorAssignment = event.assignments.find((a) => a.role === "INSTRUCTOR");
-    const associateAssignment = event.assignments.find((a) => a.role === "ASSOCIATE_INSTRUCTOR");
-    const instructorNameResolved = instructorAssignment?.user?.name || "";
+    const instructorNameResolved = staffDirectory(rawStaffName(event, "INSTRUCTOR"))?.display || "";
+    const associateNameResolved = staffDirectory(rawStaffName(event, "ASSOCIATE_INSTRUCTOR"))?.display || "";
     if (instructorName && instructorNameResolved !== instructorName) continue;
 
     // Same inherit-from-module-else-own-field resolution as
@@ -160,7 +163,7 @@ export const getStudentResponseExportRows = async (filters = {}) => {
           "Course Name": event.course?.name || "",
           "Topic / Module": topicTitle,
           Instructor: instructorNameResolved,
-          "Associate Instructor": associateAssignment?.user?.name || "",
+          "Associate Instructor": associateNameResolved,
           "Quiz Score (/10)": hasQuizScore ? quizProgress.marksObtained : "",
           "Quiz Result": hasQuizScore ? (quizProgress.marksObtained >= QUIZ_PASS_THRESHOLD ? "Pass" : "Fail") : "",
           "Quiz Completed At": quizProgress?.completedAt ? quizProgress.completedAt.toISOString() : "",

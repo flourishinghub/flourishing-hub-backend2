@@ -2,6 +2,7 @@ import { StatusCodes } from "http-status-codes";
 
 import { prisma } from "../database/prisma.js";
 import { ApiError } from "../utils/ApiError.js";
+import { rawStaffName, toFirstName } from "../utils/staffName.js";
 
 // Statuses that no longer occupy a seat — excluded from "occupied seat" counts.
 const INACTIVE_REGISTRATION_STATUSES = ["CANCELLED", "NO_SHOW", "WAITLISTED"];
@@ -412,14 +413,13 @@ export const getVolunteerDashboardData = async (userId) => {
 
   // Format completed duties (volunteering)
   const completedVolunteerEvents = completedDuties.map(assignment => {
-    const instructor = assignment.event.assignments.find(a => a.role === 'INSTRUCTOR');
     return {
       eventId: assignment.eventId,
       title: assignment.event.title,
       date: assignment.event.startAt,
       venue: assignment.event.venue,
       role: assignment.role || 'VOLUNTEER',
-      instructorName: instructor ? instructor.user.name : 'N/A',
+      instructorName: toFirstName(rawStaffName(assignment.event, 'INSTRUCTOR')) || 'N/A',
       engagementType: 'VOLUNTEERING',
       marks: null,
       maxMarks: null,
@@ -431,14 +431,13 @@ export const getVolunteerDashboardData = async (userId) => {
   const completedAttendanceEvents = attendanceRecords
     .filter(record => new Date(record.event.endAt) < new Date())
     .map(record => {
-      const instructor = record.event.assignments.find(a => a.role === 'INSTRUCTOR');
       return {
         eventId: record.eventId,
         title: record.event.title,
         date: record.event.startAt,
         venue: record.event.venue,
         role: 'PARTICIPANT',
-        instructorName: instructor ? instructor.user.name : 'N/A',
+        instructorName: toFirstName(rawStaffName(record.event, 'INSTRUCTOR')) || 'N/A',
         engagementType: 'ATTENDING',
         marks: null,
         maxMarks: null,

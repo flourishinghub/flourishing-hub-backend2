@@ -5,6 +5,7 @@ import { normalizeBatch } from "../utils/normalizeBatch.js";
 import { cascadeBundleRegistrationForNewEvent } from "./course.service.js";
 import { registerCourseBatchForEvent } from "./batchAssignment.service.js";
 import { sendStaffAssignmentEmail } from "./email.service.js";
+import { cleanStaffName, loadStaffDirectory, rawStaffName } from "../utils/staffName.js";
 
 // Statuses that no longer occupy a seat — excluded from "occupied seat" / capacity counts.
 const INACTIVE_REGISTRATION_STATUSES = ["CANCELLED", "NO_SHOW", "WAITLISTED"];
@@ -44,6 +45,8 @@ export const createEvent = async (eventData, createdById) => {
     const event = await prisma.event.create({
       data: {
         ...eventData,
+        instructorName: cleanStaffName(eventData.instructorName),
+        associateInstructorName: cleanStaffName(eventData.associateInstructorName),
         batch: normalizeBatch(eventData.batch),
         startAt,
         endAt,
@@ -80,6 +83,13 @@ export const modifyEvent = async (eventId, eventData, updatedById) => {
 
   if ("batch" in eventFields) {
     eventFields.batch = normalizeBatch(eventFields.batch);
+  }
+
+  // Free-text names are only for staff without an account — picking an
+  // account for a role clears that role's typed name so the two never disagree.
+  for (const [idField, nameField] of [["instructorId", "instructorName"], ["associateInstructorId", "associateInstructorName"]]) {
+    if (eventData[idField]) eventFields[nameField] = null;
+    else if (nameField in eventFields) eventFields[nameField] = cleanStaffName(eventFields[nameField]);
   }
 
   // Guard: if endAt equals or precedes startAt, default to startAt + 2 hours
@@ -166,6 +176,12 @@ export const assignStaff = async (eventId, userId, role, assignedById) => {
       event: true
     }
   });
+
+  // An account now covers this role — drop any typed no-account name for it.
+  const nameField = { INSTRUCTOR: "instructorName", ASSOCIATE_INSTRUCTOR: "associateInstructorName" }[role];
+  if (nameField && assignment.event[nameField]) {
+    await prisma.event.update({ where: { id: eventId }, data: { [nameField]: null } });
+  }
 
   sendStaffAssignmentEmail(
     assignment.user.email,
@@ -822,6 +838,8 @@ export const getWorkshopAnalyticsTable = async () => {
     (csvByModuleBatch[key] ||= []).push(r);
   }
 
+  const staffDirectory = await loadStaffDirectory(prisma);
+
   return events.map(event => {
     // Build lookup maps
     const attendanceMap = {};
@@ -980,6 +998,11 @@ export const getWorkshopAnalyticsTable = async () => {
     const instructor = event.assignments.find(a => a.role === "INSTRUCTOR");
     const associateInstructor = event.assignments.find(a => a.role === "ASSOCIATE_INSTRUCTOR");
     const volunteers = event.assignments.filter(a => a.role === "VOLUNTEER");
+    // Account or typed no-account name, reduced to a first name; the key
+    // (first+last) is what the Instructor view groups by, not the account id,
+    // so an account and a typed name for the same person land in one bucket.
+    const instructorStaff = staffDirectory(rawStaffName(event, "INSTRUCTOR"));
+    const associateStaff = staffDirectory(rawStaffName(event, "ASSOCIATE_INSTRUCTOR"));
 
     const present = students.filter(s => s.attendanceStatus === "PRESENT");
     // "Absent" is never written as a literal AttendanceRecord status by this
@@ -999,10 +1022,12 @@ export const getWorkshopAnalyticsTable = async () => {
       courseName: event.course?.name || "—",
       courseHasQuiz: event.course?.hasQuiz ?? false,
       moduleName: event.courseModule?.title || "—",
-      instructorName: instructor?.user?.name || "—",
+      instructorName: instructorStaff?.display || "—",
       instructorId: instructor?.user?.id || null,
-      associateInstructorName: associateInstructor?.user?.name || "—",
+      instructorKey: instructorStaff?.key || null,
+      associateInstructorName: associateStaff?.display || "—",
       associateInstructorId: associateInstructor?.user?.id || null,
+      associateInstructorKey: associateStaff?.key || null,
       volunteerNames: volunteers.map(v => v.user.name),
       date: event.startAt,
       endAt: event.endAt,
@@ -1204,9 +1229,11 @@ export const generateExcelExport = async () => {
   ];
   sheetB.getRow(1).font = { bold: true };
 
+  const staffDirectory = await loadStaffDirectory(prisma);
+
   for (const event of events) {
-    const instructor = event.assignments.find(a => a.role === 'INSTRUCTOR');
-    const associate = event.assignments.find(a => a.role === 'ASSOCIATE_INSTRUCTOR');
+    const instructorStaff = staffDirectory(rawStaffName(event, 'INSTRUCTOR'));
+    const associateStaff = staffDirectory(rawStaffName(event, 'ASSOCIATE_INSTRUCTOR'));
     const attendedSet = new Set(event.attendances.filter(a => a.status === 'PRESENT').map(a => a.userId));
     const passingScore = event.course?.isCompulsory ? 4 : 3;
     const allScores = event.modules.flatMap(m => m.progressEntries.map(p => p.marksObtained).filter(v => v != null));
@@ -1218,8 +1245,8 @@ export const generateExcelExport = async () => {
       batch: event.batch || '—',
       date: fmtDate(event.startAt),
       venue: event.venue || '—',
-      instructor: instructor?.user?.name || '—',
-      associate: associate?.user?.name || '—',
+      instructor: instructorStaff?.display || '—',
+      associate: associateStaff?.display || '—',
       registered: event.registrations.length,
       attended: attendedSet.size,
       absent: event.registrations.length - attendedSet.size,
@@ -1240,22 +1267,26 @@ export const generateExcelExport = async () => {
   ];
   sheetC.getRow(1).font = { bold: true };
 
+  // Instructors/associates are keyed by first+last name (see utils/staffName.js)
+  // so an account and a typed no-account name for the same person are one
+  // row; volunteers only ever exist as accounts and stay keyed by user id.
   const facilitatorMap = {};
+  const addFacilitator = (key, name, dept, role, ratings) => {
+    if (!facilitatorMap[key]) facilitatorMap[key] = { name, dept, role, workshops: 0, ratings: [] };
+    if (facilitatorMap[key].dept === '—' && dept !== '—') facilitatorMap[key].dept = dept;
+    facilitatorMap[key].workshops += 1;
+    facilitatorMap[key].ratings.push(...ratings);
+  };
   for (const event of events) {
     const ratings = event.feedbackEntries.map(f => f.eventRating).filter(Boolean);
-    for (const a of event.assignments) {
-      const id = a.user.id;
-      if (!facilitatorMap[id]) {
-        facilitatorMap[id] = {
-          name: a.user.name,
-          dept: a.user.instructorProfile?.department || '—',
-          role: a.role === 'INSTRUCTOR' ? 'Lead' : 'Associate',
-          workshops: 0,
-          ratings: []
-        };
-      }
-      facilitatorMap[id].workshops += 1;
-      facilitatorMap[id].ratings.push(...ratings);
+    for (const [role, label] of [['INSTRUCTOR', 'Lead'], ['ASSOCIATE_INSTRUCTOR', 'Associate']]) {
+      const staff = staffDirectory(rawStaffName(event, role));
+      if (!staff) continue;
+      const account = event.assignments.find(a => a.role === role)?.user;
+      addFacilitator(`${role}:${staff.key}`, staff.display, account?.instructorProfile?.department || '—', label, ratings);
+    }
+    for (const a of event.assignments.filter(a => a.role === 'VOLUNTEER')) {
+      addFacilitator(`VOLUNTEER:${a.user.id}`, a.user.name, a.user.instructorProfile?.department || '—', 'Volunteer', ratings);
     }
   }
   for (const f of Object.values(facilitatorMap)) {

@@ -9,6 +9,7 @@ import { slugify } from "../utils/slugify.js";
 import { cascadeBundleRegistrationForNewEvent } from "./course.service.js";
 import { normalizeBatch } from "../utils/normalizeBatch.js";
 import { sendStaffAssignmentEmail } from "./email.service.js";
+import { cleanStaffName } from "../utils/staffName.js";
 
 const parseRegistrationNotes = (notes) => {
   if (!notes) {
@@ -126,6 +127,11 @@ export const createEvent = async (payload, createdById) => {
       courseModuleId: payload.courseModuleId || undefined,
       batch: normalizeBatch(payload.batch),
       registrationMode: payload.registrationMode || undefined,
+      // Typed name is kept only when no account covers the role — an import
+      // row whose name didn't match any staff account lands here instead of
+      // being lost.
+      instructorName: payload.instructorId ? null : cleanStaffName(payload.instructorName) ?? null,
+      associateInstructorName: payload.associateInstructorId ? null : cleanStaffName(payload.associateInstructorName) ?? null,
       createdById,
       modules: templateModules.length
         ? {
@@ -341,6 +347,12 @@ export const updateEvent = async (eventId, payload) => {
         : {}),
       ...(payload.requiresCheckIn !== undefined ? { requiresCheckIn: payload.requiresCheckIn } : {}),
       ...(payload.templateId !== undefined ? { templateId: payload.templateId } : {}),
+      ...(payload.instructorId
+        ? { instructorName: null }
+        : payload.instructorName !== undefined ? { instructorName: cleanStaffName(payload.instructorName) } : {}),
+      ...(payload.associateInstructorId
+        ? { associateInstructorName: null }
+        : payload.associateInstructorName !== undefined ? { associateInstructorName: cleanStaffName(payload.associateInstructorName) } : {}),
       ...(moduleData ? { modules: moduleData } : {})
     },
     include: { modules: true }
