@@ -36,6 +36,26 @@ const getCell = (row, aliases) => {
   return hit ? String(hit[1] ?? "").trim() : "";
 };
 
+// Google Forms exports a timestamp as "8/19/2026 19:14:42" or, depending on
+// the form owner's locale, "31/08/2026 19:54:54". Date.parse reads both as
+// month/day, so a day/month sheet sorts wrong (or not at all). Decide the
+// order once per sheet: a first part > 12 means day/month, a second part
+// > 12 means month/day; ambiguous sheets fall back to row order.
+export const makeTimestampParser = (values) => {
+  const parts = values
+    .map((v) => String(v ?? "").match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/))
+    .filter(Boolean);
+  const dayFirst = parts.some((m) => Number(m[1]) > 12);
+  const monthFirst = parts.some((m) => Number(m[2]) > 12);
+  if (dayFirst === monthFirst) return () => NaN;
+  return (value) => {
+    const m = String(value ?? "").match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+    if (!m) return NaN;
+    const [day, month] = dayFirst ? [m[1], m[2]] : [m[2], m[1]];
+    return Date.UTC(Number(m[3]), Number(month) - 1, Number(day), Number(m[4] || 0), Number(m[5] || 0), Number(m[6] || 0));
+  };
+};
+
 // "9 / 10" -> 9 ; "9/10" -> 9 ; "9" -> 9 ; "" -> null
 const parseScore = (raw) => {
   if (raw == null || String(raw).trim() === "") return null;
@@ -122,8 +142,9 @@ export const importTopicQuizScores = async ({ courseId, topic, fileBuffer, fileN
   // Process in submission order so a student's latest response wins when they
   // submitted more than once (Google Forms exports are usually already in
   // order; this keeps it true for a re-sorted sheet too).
+  const parseAt = makeTimestampParser(rows.map((row) => getCell(row, ["Timestamp"])));
   const ordered = rows
-    .map((row, i) => ({ row, rowNo: i + 2, at: Date.parse(getCell(row, ["Timestamp"])) }))
+    .map((row, i) => ({ row, rowNo: i + 2, at: parseAt(getCell(row, ["Timestamp"])) }))
     .sort((a, b) => (Number.isNaN(a.at) || Number.isNaN(b.at) ? a.rowNo - b.rowNo : a.at - b.at || a.rowNo - b.rowNo));
 
   for (const { row, rowNo } of ordered) {
