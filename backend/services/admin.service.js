@@ -6,6 +6,7 @@ import { cascadeBundleRegistrationForNewEvent } from "./course.service.js";
 import { registerCourseBatchForEvent } from "./batchAssignment.service.js";
 import { sendStaffAssignmentEmail } from "./email.service.js";
 import { cleanStaffName, loadStaffDirectory, rawStaffName } from "../utils/staffName.js";
+import { SCORE_MODULE_TITLE } from "./quizScoreImport.service.js";
 
 // Statuses that no longer occupy a seat — excluded from "occupied seat" / capacity counts.
 const INACTIVE_REGISTRATION_STATUSES = ["CANCELLED", "NO_SHOW", "WAITLISTED"];
@@ -779,6 +780,7 @@ export const getWorkshopAnalyticsTable = async () => {
       modules: {
         select: {
           id: true,
+          title: true,
           maxMarks: true,
           sourceQuizId: true,
           progressEntries: {
@@ -898,10 +900,19 @@ export const getWorkshopAnalyticsTable = async () => {
     // legacy Google-Form webhook's module or a template/bulk-import module.
     // Always out of 10 by construction (see QUIZ_QUESTION_COUNT), so a raw
     // score comparison against the pass threshold needs no scaling.
-    const quizModule = event.modules.find(m => m.sourceQuizId != null);
+    // A topic score uploaded from the Google-Form sheet (quizScoreImport's
+    // "Quiz Score" module, also out of 10) stands in when there is no in-built
+    // submission, so the Result column grades on whichever score exists.
+    // Whether any score source exists for this session yet (an uploaded topic
+    // sheet, or an in-built quiz) — until one does, "attended but no score"
+    // means "not graded yet" (Pending) rather than "did not take the quiz".
+    const quizScoresAvailable = event.modules.some(m => m.sourceQuizId != null || m.title === SCORE_MODULE_TITLE);
     const quizScoreMap = {};
-    if (quizModule) {
-      quizModule.progressEntries.forEach(p => {
+    for (const mod of [
+      event.modules.find(m => m.title === SCORE_MODULE_TITLE && m.sourceQuizId == null),
+      event.modules.find(m => m.sourceQuizId != null), // in-built quiz wins when both exist
+    ]) {
+      mod?.progressEntries.forEach(p => {
         if (p.marksObtained != null) quizScoreMap[p.studentProfileId] = p.marksObtained;
       });
     }
@@ -948,10 +959,11 @@ export const getWorkshopAnalyticsTable = async () => {
       hasCheckedIn: true,
       checkInStatus: "NOT_CHECKED_IN",
       physicalSheetStatus: "PRESENT",
-      quizCompleted: false,
-      score: null,
-      maxScore: null,
-      quizScore: null,
+      quizCompleted: p.quizScore != null,
+      // Uploaded topic score for a no-account signer (see PendingAttendance.quizScore)
+      score: p.quizScore ?? null,
+      maxScore: p.quizScore != null ? 10 : null,
+      quizScore: p.quizScore ?? null,
       rating: null,
       registrationStatus: null,
       isPending: true
@@ -1024,6 +1036,7 @@ export const getWorkshopAnalyticsTable = async () => {
       workshopName: event.title,
       courseName: event.course?.name || "—",
       courseHasQuiz: event.course?.hasQuiz ?? false,
+      quizScoresAvailable,
       moduleName: event.courseModule?.title || "—",
       instructorName: instructorStaff?.display || "—",
       instructorId: instructor?.user?.id || null,

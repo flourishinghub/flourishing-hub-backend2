@@ -463,6 +463,9 @@ model PendingAttendance {
   source        String?
   isMatched     Boolean          @default(false)
   matchedUserId String?
+  // Uploaded topic quiz score (out of 10) for a signer with no account yet —
+  // ModuleProgress needs a StudentProfile, which they don't have.
+  quizScore     Float?
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
 
