@@ -1161,20 +1161,22 @@ export const generateExcelExport = async () => {
     })
   ]);
 
-  // No-account physical-sheet signers (PendingAttendance, status PRESENT) never have an
-  // EventRegistration row, so the `event.registrations` loops below never see them —
-  // unlike getWorkshopAnalyticsTable (the Analytics tab's data source), which surfaces
-  // them via its own pendingStudents rows. Fetched once, grouped by event, and appended
-  // into Sheet D below so a student marked Present from a physical sheet with no account
-  // yet shows up in this export too, instead of only in the Analytics dashboard.
-  const pendingPresentRows = await prisma.pendingAttendance.findMany({
-    where: { eventId: { in: events.map(e => e.id) }, status: "PRESENT" },
-    select: { eventId: true, name: true, rollNumber: true, email: true, source: true }
-  });
-  const pendingPresentByEvent = {};
-  for (const p of pendingPresentRows) {
-    (pendingPresentByEvent[p.eventId] ||= []).push(p);
-  }
+  // Attendance in this export comes straight from getWorkshopAnalyticsTable —
+  // the Analytics tab's own data — so the two can never disagree. It already
+  // includes no-account sheet signers (unmatched PendingAttendance) and
+  // no-account CSV absentees, and never counts a pending row a second time
+  // once it has been matched to a real account. (This export used to rebuild
+  // attendance from registrations + every pending row, which double-counted
+  // matched signers, dropped no-account absentees, and showed absentees as
+  // "Not Marked".) It only covers sessions that have taken place; upcoming
+  // ones have no attendance yet and fall back to their registrations.
+  const analyticsById = new Map((await getWorkshopAnalyticsTable()).map(r => [r.id, r]));
+  // Same Present / Absent / In-progress rule as the Analytics views.
+  const finalStatusOf = (s) => {
+    if (s.attendanceStatus === 'PRESENT') return 'Present';
+    if (s.attendanceStatus === 'ABSENT' || !s.hasCheckedIn) return 'Absent';
+    return 'Verification In-progress';
+  };
 
   const fmtDate = (d) => d ? new Date(d).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : '—';
 
@@ -1195,8 +1197,10 @@ export const generateExcelExport = async () => {
   for (const course of courses) {
     const courseEvents = events.filter(e => e.courseId === course.id);
     const totalReg = courseEvents.reduce((s, e) => s + e.registrations.length, 0);
-    const totalAttended = courseEvents.reduce((s, e) => s + e.attendances.filter(a => a.status === 'PRESENT').length, 0);
-    const totalPossible = courseEvents.reduce((s, e) => s + e.registrations.length, 0);
+    // Attendance rate over sessions that have happened, on the Analytics roster.
+    const sessionRows = courseEvents.map(e => analyticsById.get(e.id)).filter(Boolean);
+    const totalAttended = sessionRows.reduce((s, r) => s + r.totalAttended, 0);
+    const totalPossible = sessionRows.reduce((s, r) => s + r.students.length, 0);
     const allScores = courseEvents.flatMap(e => e.modules.flatMap(m => m.progressEntries.map(p => p.marksObtained).filter(v => v != null)));
     const avgScore = allScores.length ? (allScores.reduce((a, b) => a + b, 0) / allScores.length).toFixed(2) : '—';
     const passed = allScores.filter(s => s >= (course.isCompulsory ? 4 : 3)).length;
@@ -1226,6 +1230,7 @@ export const generateExcelExport = async () => {
     { header: 'Pre-Registered', key: 'registered', width: 16 },
     { header: 'Attended (Verified)', key: 'attended', width: 20 },
     { header: 'Absentees', key: 'absent', width: 12 },
+    { header: 'Verification In-progress', key: 'inProgress', width: 22 },
     { header: 'Passed', key: 'passed', width: 10 },
     { header: 'Failed', key: 'failed', width: 10 },
     { header: 'Avg Feedback Rating', key: 'rating', width: 20 },
@@ -1237,7 +1242,7 @@ export const generateExcelExport = async () => {
   for (const event of events) {
     const instructorStaff = staffDirectory(rawStaffName(event, 'INSTRUCTOR'));
     const associateStaff = staffDirectory(rawStaffName(event, 'ASSOCIATE_INSTRUCTOR'));
-    const attendedSet = new Set(event.attendances.filter(a => a.status === 'PRESENT').map(a => a.userId));
+    const session = analyticsById.get(event.id);
     const passingScore = event.course?.isCompulsory ? 4 : 3;
     const allScores = event.modules.flatMap(m => m.progressEntries.map(p => p.marksObtained).filter(v => v != null));
     const ratings = event.feedbackEntries.map(f => f.eventRating).filter(Boolean);
@@ -1251,8 +1256,10 @@ export const generateExcelExport = async () => {
       instructor: instructorStaff?.display || '—',
       associate: associateStaff?.display || '—',
       registered: event.registrations.length,
-      attended: attendedSet.size,
-      absent: event.registrations.length - attendedSet.size,
+      // Blank for sessions that haven't happened yet.
+      attended: session ? session.totalAttended : '—',
+      absent: session ? session.totalAbsent : '—',
+      inProgress: session ? session.students.filter(s => finalStatusOf(s) === 'Verification In-progress').length : '—',
       passed: allScores.filter(s => s >= passingScore).length,
       failed: allScores.filter(s => s < passingScore).length,
       rating: ratings.length ? (ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1) : '—',
@@ -1332,20 +1339,32 @@ export const generateExcelExport = async () => {
         if (p.marksObtained != null) progressMap[p.studentProfileId] = p.marksObtained;
       });
     });
-    const passingScore = event.course?.isCompulsory ? 4 : 3;
+    const spByUser = Object.fromEntries(event.registrations.map(reg => [reg.userId, reg.user.studentProfile]));
+    const session = analyticsById.get(event.id);
 
-    for (const reg of event.registrations) {
-      const sp = reg.user.studentProfile;
-      const att = attendanceMap[reg.userId];
+    // A session that has happened lists the Analytics roster (registrants,
+    // no-account sheet signers and no-account CSV absentees); an upcoming one
+    // lists its registrations, with nothing to mark yet.
+    const roster = session
+      ? session.students
+      : event.registrations.map(reg => ({
+          userId: reg.userId, name: reg.user.name, email: reg.user.email,
+          rollNo: reg.user.studentProfile?.rollNumber || '—',
+          programme: reg.user.studentProfile?.programme, department: reg.user.studentProfile?.department,
+          attendanceStatus: 'NOT_MARKED', hasCheckedIn: false
+        }));
+
+    for (const s of roster) {
+      const sp = s.userId ? spByUser[s.userId] : null;
+      const att = s.userId ? attendanceMap[s.userId] : null;
       const score = sp ? progressMap[sp.id] : null;
-      const attStatus = att?.status || 'NOT_MARKED';
-      const finalStatus = attStatus === 'PRESENT' ? 'Present' : attStatus === 'ABSENT' ? 'Absent' : 'Not Marked';
+      const status = !session ? 'Upcoming' : finalStatusOf(s);
       sheetD.addRow({
-        name: reg.user.name,
-        roll: sp?.rollNumber || '—',
-        email: reg.user.email,
-        programme: sp?.programme || '—',
-        dept: sp?.department || '—',
+        name: s.name || '—',
+        roll: s.rollNo || '—',
+        email: s.email || '—',
+        programme: s.programme || '—',
+        dept: s.department || '—',
         // Prefer this event's own course+batch-scoped batch over the student's
         // flat StudentProfile.cohort — see getEventWithRegistrations for why.
         batch: event.batch || sp?.cohort || '—',
@@ -1353,31 +1372,10 @@ export const generateExcelExport = async () => {
         workshop: event.title,
         date: fmtDate(event.startAt),
         checkin: att?.markedAt ? fmtDate(att.markedAt) : '—',
-        attendance: attStatus,
+        attendance: s.attendanceStatus,
         score: score != null ? `${score} / 5` : '—',
-        rating: feedbackMap[reg.userId] != null ? feedbackMap[reg.userId] : '—',
-        status: finalStatus,
-      });
-    }
-
-    // No-account signers: same Present row shape as above, minus anything that
-    // requires a real account (programme/dept/score/rating — all unknown pre-signup).
-    for (const p of pendingPresentByEvent[event.id] || []) {
-      sheetD.addRow({
-        name: p.name || '—',
-        roll: p.rollNumber || '—',
-        email: p.email || '—',
-        programme: '—',
-        dept: '—',
-        batch: event.batch || '—',
-        courseCode: event.course?.code || '—',
-        workshop: event.title,
-        date: fmtDate(event.startAt),
-        checkin: '—',
-        attendance: 'PRESENT',
-        score: '—',
-        rating: '—',
-        status: 'Present (no account yet)',
+        rating: s.userId && feedbackMap[s.userId] != null ? feedbackMap[s.userId] : '—',
+        status: s.userId ? status : `${status} (no account yet)`,
       });
     }
   }
