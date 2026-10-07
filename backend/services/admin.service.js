@@ -860,8 +860,12 @@ export const getWorkshopAnalyticsTable = async () => {
     // by checkedInAt desc) — a user with more than one check-in for this
     // event only gets counted once.
     const checkInStatusMap = {};
+    const checkInTimeMap = {};
     event.checkIns.forEach(c => {
-      if (!(c.userId in checkInStatusMap)) checkInStatusMap[c.userId] = c.status;
+      if (!(c.userId in checkInStatusMap)) {
+        checkInStatusMap[c.userId] = c.status;
+        checkInTimeMap[c.userId] = c.checkedInAt;
+      }
     });
     const checkedInUserIds = new Set(
       Object.entries(checkInStatusMap).filter(([, status]) => status === "PENDING" || status === "VERIFIED").map(([userId]) => userId)
@@ -934,6 +938,7 @@ export const getWorkshopAnalyticsTable = async () => {
         attendanceStatus: attendanceMap[reg.userId] || "NOT_MARKED",
         hasCheckedIn: checkedInUserIds.has(reg.userId),
         checkInStatus: toCheckInDisplayStatus(reg.userId),
+        checkedInAt: checkInTimeMap[reg.userId] ?? null,
         physicalSheetStatus: physicalSheetMap[reg.userId] ?? null,
         quizCompleted: progress?.completed || false,
         score: progress?.marks ?? null,
@@ -1190,6 +1195,25 @@ export const generateExcelExport = async () => {
     if (s.attendanceStatus === 'ABSENT' || !s.hasCheckedIn) return 'Absent';
     return 'Verification In-progress';
   };
+  // Transcript Final Status: the Student-Level view's Result rule
+  // (frontend computeModuleStatus) — attended + quiz >= 4/10 is Present,
+  // below 4 is Absent, attended with no score once the topic's scores exist
+  // is "Quiz Not Attempted".
+  const resultOf = (s, row) => {
+    const sessionOver = !row.endAt || new Date(row.endAt).getTime() <= Date.now();
+    if (!sessionOver && (!row.courseHasQuiz || s.quizScore == null)) return 'Pending';
+    if (s.attendanceStatus === 'NOT_MARKED') return s.hasCheckedIn ? 'Verification In-progress' : 'Absent';
+    if (s.attendanceStatus !== 'PRESENT') return 'Absent';
+    if (!row.courseHasQuiz) return 'Present';
+    if (s.quizScore == null) return row.quizScoresAvailable ? 'Quiz Not Attempted' : 'Pending';
+    return s.quizScore >= 4 ? 'Present' : 'Absent';
+  };
+  // In-built / uploaded topic quiz scores are out of 10; other score modules keep their own max.
+  const scoreOf = (s) => {
+    if (s.quizScore != null) return `${s.quizScore} / 10`;
+    if (s.score != null) return s.maxScore ? `${s.score} / ${s.maxScore}` : `${s.score}`;
+    return '—';
+  };
 
   const fmtDate = (d) => d ? new Date(d).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : '—';
 
@@ -1343,15 +1367,7 @@ export const generateExcelExport = async () => {
   sheetD.getRow(1).font = { bold: true };
 
   for (const event of events) {
-    const attendanceMap = Object.fromEntries(event.attendances.map(a => [a.userId, a]));
     const feedbackMap = Object.fromEntries(event.feedbackEntries.map(f => [f.userId, f.eventRating]));
-    const progressMap = {};
-    event.modules.forEach(mod => {
-      mod.progressEntries.forEach(p => {
-        if (!progressMap[p.studentProfileId]) progressMap[p.studentProfileId] = null;
-        if (p.marksObtained != null) progressMap[p.studentProfileId] = p.marksObtained;
-      });
-    });
     const spByUser = Object.fromEntries(event.registrations.map(reg => [reg.userId, reg.user.studentProfile]));
     const session = analyticsById.get(event.id);
 
@@ -1369,9 +1385,9 @@ export const generateExcelExport = async () => {
 
     for (const s of roster) {
       const sp = s.userId ? spByUser[s.userId] : null;
-      const att = s.userId ? attendanceMap[s.userId] : null;
-      const score = sp ? progressMap[sp.id] : null;
-      const status = !session ? 'Upcoming' : finalStatusOf(s);
+      // Score and status come from the Analytics row too, so a no-account
+      // signer's uploaded score shows and Final Status matches the Result column.
+      const status = !session ? 'Upcoming' : resultOf(s, session);
       sheetD.addRow({
         name: s.name || '—',
         roll: s.rollNo || '—',
@@ -1384,9 +1400,10 @@ export const generateExcelExport = async () => {
         courseCode: event.course?.code || '—',
         workshop: event.title,
         date: fmtDate(event.startAt),
-        checkin: att?.markedAt ? fmtDate(att.markedAt) : '—',
+        // The student's own app check-in time (not when attendance was marked).
+        checkin: s.checkedInAt ? fmtDate(s.checkedInAt) : '—',
         attendance: s.attendanceStatus,
-        score: score != null ? `${score} / 5` : '—',
+        score: session ? scoreOf(s) : '—',
         rating: s.userId && feedbackMap[s.userId] != null ? feedbackMap[s.userId] : '—',
         status: s.userId ? status : `${status} (no account yet)`,
       });
