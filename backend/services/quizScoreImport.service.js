@@ -57,6 +57,12 @@ export const makeTimestampParser = (values) => {
   };
 };
 
+// "26b0359@iitb.ac.in" -> "26B0359" ; a name-style address -> null
+const rollFromEmail = (email) => {
+  const m = String(email ?? "").match(/^(\d{2}[a-z]\d{4})@/i);
+  return m ? m[1].toUpperCase() : null;
+};
+
 // "9 / 10" -> 9 ; "9/10" -> 9 ; "9" -> 9 ; "" -> null
 const parseScore = (raw) => {
   if (raw == null || String(raw).trim() === "") return null;
@@ -128,9 +134,12 @@ export const importTopicQuizScores = async ({ courseId, topic, fileBuffer, fileN
     where: { eventId: { in: eventIds }, isMatched: false, status: "PRESENT" },
     select: { id: true, rollNumber: true, email: true },
   });
-  const findPending = (roll, email) =>
-    pendingRows.find((p) => roll && normalizeKey(p.rollNumber) === normalizeKey(roll)) ||
-    pendingRows.find((p) => email && (p.email || "").toLowerCase() === email);
+  // Same order as for account holders: the email (or the roll inside it)
+  // first, then the typed roll.
+  const findPending = (roll, email, emailRoll) =>
+    pendingRows.find((p) => email && (p.email || "").toLowerCase() === email) ||
+    pendingRows.find((p) => emailRoll && normalizeKey(p.rollNumber) === normalizeKey(emailRoll)) ||
+    pendingRows.find((p) => roll && normalizeKey(p.rollNumber) === normalizeKey(roll));
 
   // Every batch of the topic gets its score module up front, even one with no
   // matching student in this sheet: the module's existence is what tells the
@@ -173,8 +182,14 @@ export const importTopicQuizScores = async ({ courseId, topic, fileBuffer, fileN
         where: { ...where, user: { ...where.user, isActive: true } },
         select: { id: true, userId: true, rollNumber: true },
       });
+    // An institute email carries the roll ("26b0359@iitb.ac.in" -> 26B0359).
+    // When no account uses that email (e.g. the student signed up with
+    // another address), the roll taken from the email finds them instead.
+    const emailRoll = rollFromEmail(email);
     const byRoll = roll ? await activeProfile({ rollNumber: { equals: roll, mode: "insensitive" } }) : null;
-    const byEmail = email ? await activeProfile({ user: { email } }) : null;
+    const byEmail =
+      (email ? await activeProfile({ user: { email } }) : null) ||
+      (emailRoll ? await activeProfile({ rollNumber: { equals: emailRoll, mode: "insensitive" } }) : null);
     const profile = byEmail || byRoll || null;
     if (byRoll && byEmail && byRoll.id !== byEmail.id) {
       result.conflictRows.push({
@@ -185,14 +200,14 @@ export const importTopicQuizScores = async ({ courseId, topic, fileBuffer, fileN
       });
     }
     if (!profile) {
-      const pending = findPending(roll, email);
+      const pending = findPending(roll, email, emailRoll);
       if (pending) {
         await prisma.pendingAttendance.update({ where: { id: pending.id }, data: { quizScore: score } });
         result.noAccount += 1;
         continue;
       }
       result.skipped += 1;
-      result.skippedRows.push({ row: rowNo, roll: roll || email, reason: "no student account matches this roll/email" });
+      result.skippedRows.push({ row: rowNo, roll: roll || email, reason: "no student account matches this roll/email, and no Present sheet row for it in this topic" });
       continue;
     }
 
