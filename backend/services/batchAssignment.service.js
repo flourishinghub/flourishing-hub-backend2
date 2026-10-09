@@ -481,7 +481,14 @@ export const uploadBatchAssignment = async ({ fileBuffer, fileName, courseId, re
             where: {
               userId: existingUser.id,
               status: { not: "CANCELLED" },
-              event: { courseId, courseModuleId, batch: { in: previousBatchCodes } }
+              // Never the session they were actually Present at: a move to
+              // a Buffer/make-up batch used to cancel the attended session
+              // and leave only the new one, hiding a real Present (MTC,
+              // 2026-10-09: M2B8/M2B9/M3B7 attendance lost this way).
+              event: {
+                courseId, courseModuleId, batch: { in: previousBatchCodes },
+                attendances: { none: { userId: existingUser.id, status: "PRESENT" } }
+              }
             },
             data: { status: "CANCELLED" }
           });
@@ -684,7 +691,12 @@ const cancelRegistrationsForAssignment = async (userId, courseId, courseModuleId
     where: {
       userId,
       status: { not: "CANCELLED" },
-      event: { courseId, courseModuleId, batch: { equals: batchCode, mode: "insensitive" } }
+      // Removing a student from a batch roster must not erase a session they
+      // were Present at — that registration is what shows the Present.
+      event: {
+        courseId, courseModuleId, batch: { equals: batchCode, mode: "insensitive" },
+        attendances: { none: { userId, status: "PRESENT" } }
+      }
     },
     data: { status: "CANCELLED" }
   });
