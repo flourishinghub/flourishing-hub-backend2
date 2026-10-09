@@ -10,7 +10,8 @@
 // One sheet = one topic (workshopName), covering every batch. Columns:
 //   - "Roll No"  (match key; case-insensitive)
 //   - "Score"    ("9 / 10" or "9" — numerator is taken, denominator fixed 10)
-//   - "Email Address" (fallback match when the roll finds no account)
+//   - "Email Address" (match key, checked together with the roll; when the two
+//     point at different students the verified email wins)
 //   - "Timestamp" (optional; repeat submissions -> the latest one wins)
 // Any other column (e.g. a rating) is ignored. A signer with no account yet
 // gets the score on their PendingAttendance row (quizScore) instead.
@@ -137,7 +138,7 @@ export const importTopicQuizScores = async ({ courseId, topic, fileBuffer, fileN
   // missing score now means Absent rather than Pending).
   for (const e of events) await getScoreModuleId(e.id);
 
-  const result = { totalRows: rows.length, updated: 0, created: 0, noAccount: 0, skipped: 0, skippedRows: [] };
+  const result = { totalRows: rows.length, updated: 0, created: 0, noAccount: 0, skipped: 0, skippedRows: [], conflictRows: [] };
 
   // Process in submission order so a student's latest response wins when they
   // submitted more than once (Google Forms exports are usually already in
@@ -163,15 +164,26 @@ export const importTopicQuizScores = async ({ courseId, topic, fileBuffer, fileN
       continue;
     }
 
-    // Roll first, email only as a fallback: a typo'd email (someone else's
-    // address) must not redirect the score when the roll is right, while a
-    // mistyped roll still resolves through the email.
+    // Check roll and email together. When both find the same student, or only
+    // one finds anyone, use that student. When they point at two different
+    // students, the email wins: the form collects a verified sign-in email,
+    // while the roll is typed by hand. The row is reported in conflictRows.
     const activeProfile = (where) =>
-      prisma.studentProfile.findFirst({ where: { ...where, user: { ...where.user, isActive: true } }, select: { id: true, userId: true } });
-    const profile =
-      (roll && (await activeProfile({ rollNumber: { equals: roll, mode: "insensitive" } }))) ||
-      (email && (await activeProfile({ user: { email } }))) ||
-      null;
+      prisma.studentProfile.findFirst({
+        where: { ...where, user: { ...where.user, isActive: true } },
+        select: { id: true, userId: true, rollNumber: true },
+      });
+    const byRoll = roll ? await activeProfile({ rollNumber: { equals: roll, mode: "insensitive" } }) : null;
+    const byEmail = email ? await activeProfile({ user: { email } }) : null;
+    const profile = byEmail || byRoll || null;
+    if (byRoll && byEmail && byRoll.id !== byEmail.id) {
+      result.conflictRows.push({
+        row: rowNo,
+        roll,
+        email,
+        reason: `Roll No ${roll} belongs to another student; score saved for the email owner (${byEmail.rollNumber})`,
+      });
+    }
     if (!profile) {
       const pending = findPending(roll, email);
       if (pending) {
