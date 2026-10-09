@@ -1415,6 +1415,8 @@ export const generateExcelExport = async () => {
   // Student-Level view (frontend aggregateStudents), see buildStudentModuleSummary.
   const sessionRows = [...analyticsById.values()];
   for (const course of courses) {
+    // Test courses ("Test Wellness", "Test MTC", "Testing") get no summary sheet.
+    if (/^test/i.test(course.name.trim())) continue;
     const summary = buildStudentModuleSummary(sessionRows.filter(r => r.courseName === course.name));
     if (!summary.students.length) continue;
     const isWellness = course.name === WELLNESS_COURSE;
