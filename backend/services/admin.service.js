@@ -1420,6 +1420,8 @@ export const generateExcelExport = async () => {
     const summary = buildStudentModuleSummary(sessionRows.filter(r => r.courseName === course.name));
     if (!summary.students.length) continue;
     const isWellness = course.name === WELLNESS_COURSE;
+    // Wellness and MTC run physical sheets: show Digital + Physical next to Final.
+    const showEvidence = isWellness || isMtcCourse(course.name);
     const sheetName = `E - ${course.code || course.name}`.replace(/[\\/?*[\]:]/g, ' ').slice(0, 31);
     const sheetE = workbook.addWorksheet(sheetName);
     sheetE.columns = [
@@ -1430,7 +1432,11 @@ export const generateExcelExport = async () => {
       { header: 'Programme', key: 'programme', width: 14 },
       ...summary.modules.flatMap((m, i) => [
         { header: `${m} — Batch`, key: `b${i}`, width: 18 },
-        { header: `${m} — ${isWellness ? 'Final Attendance' : 'Attendance'}`, key: `a${i}`, width: 18 },
+        ...(showEvidence ? [
+          { header: `${m} — Digital Attendance`, key: `d${i}`, width: 18 },
+          { header: `${m} — Physical Attendance`, key: `p${i}`, width: 18 },
+        ] : []),
+        { header: `${m} — ${showEvidence ? 'Final Attendance' : 'Attendance'}`, key: `a${i}`, width: 18 },
         ...(course.hasQuiz ? [{ header: `${m} — Score`, key: `s${i}`, width: 12 }] : []),
       ]),
       { header: 'Modules Present', key: 'present', width: 16 },
@@ -1448,6 +1454,10 @@ export const generateExcelExport = async () => {
       summary.modules.forEach((m, i) => {
         const r = s.modules[m];
         row[`b${i}`] = r ? r.batches.join(' → ') || '—' : '—';
+        if (showEvidence) {
+          row[`d${i}`] = r ? (r.digital ? 'Present' : 'Absent') : '—';
+          row[`p${i}`] = r ? (r.physical ? 'Present' : 'Absent') : '—';
+        }
         row[`a${i}`] = r ? { PRESENT: 'Present', ABSENT: 'Absent', PENDING: 'Pending' }[r.final] : '—';
         if (course.hasQuiz) row[`s${i}`] = r?.score != null ? `${r.score} / 10` : '—';
       });
@@ -1470,6 +1480,17 @@ const WELLNESS_COURSE = "Wellness Workshop";
 const WELLNESS_PASS_SCORE = 4;
 
 const sessionIsOver = (row) => !row.endAt || new Date(row.endAt).getTime() <= Date.now();
+
+// Mentor Training Course (admin rule, 2026-10-09): digital (check-in) and
+// physical attendance are both shown; either one makes the student Present
+// (no quiz). A REJECTED check-in doesn't count; an already-recorded Present
+// stays Present. Pending only while the session hasn't ended.
+const isMtcCourse = (courseName) => Boolean(courseName?.startsWith("Mentor Training Course"));
+const mtcFinal = (s, row) => {
+  const digital = s.checkInStatus === "CHECKED_IN_PENDING" || s.checkInStatus === "CHECKED_IN_VERIFIED";
+  if (s.attendanceStatus === "PRESENT" || s.physicalSheetStatus === "PRESENT" || digital) return "PRESENT";
+  return sessionIsOver(row) ? "ABSENT" : "PENDING";
+};
 
 const wellnessFinal = (s, row) => {
   const physical = s.physicalSheetStatus === "PRESENT";
@@ -1494,13 +1515,16 @@ const moduleStatusRank = (s, row) => {
 
 const moduleFinal = (s, row) => {
   if (row.courseName === WELLNESS_COURSE) return wellnessFinal(s, row);
+  if (isMtcCourse(row.courseName)) return mtcFinal(s, row);
   if (!sessionIsOver(row)) return "PENDING";
   if (s.attendanceStatus === "NOT_MARKED") return s.hasCheckedIn ? "PENDING" : "ABSENT";
   return s.attendanceStatus === "PRESENT" ? "PRESENT" : "ABSENT";
 };
 
 const sessionRank = ({ s, row }) => [
-  row.courseName === WELLNESS_COURSE ? { PRESENT: 3, PENDING: 2, ABSENT: 1 }[wellnessFinal(s, row)] : moduleStatusRank(s, row),
+  row.courseName === WELLNESS_COURSE || isMtcCourse(row.courseName)
+    ? { PRESENT: 3, PENDING: 2, ABSENT: 1 }[moduleFinal(s, row)]
+    : moduleStatusRank(s, row),
   s.quizScore != null || s.score != null ? 1 : 0,
   (s.physicalSheetStatus === "PRESENT" ? 1 : 0) + (s.hasCheckedIn ? 1 : 0),
   new Date(row.date).getTime(),
@@ -1544,6 +1568,8 @@ export const buildStudentModuleSummary = (rows) => {
       }
       out.modules[moduleKey] = {
         final,
+        digital: s.checkInStatus === "CHECKED_IN_PENDING" || s.checkInStatus === "CHECKED_IN_VERIFIED",
+        physical: s.physicalSheetStatus === "PRESENT",
         // The chosen session's score, else any other session's, so a quiz the
         // student did take still shows.
         score: s.quizScore ?? sessions.map(x => x.s.quizScore).find(q => q != null) ?? null,
