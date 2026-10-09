@@ -1410,7 +1410,151 @@ export const generateExcelExport = async () => {
     }
   }
 
+  // ─── Sheet E: Student Module Summary (one sheet per course) ───
+  // One student, one line, one result per module — same rules as the
+  // Student-Level view (frontend aggregateStudents), see buildStudentModuleSummary.
+  const sessionRows = [...analyticsById.values()];
+  for (const course of courses) {
+    const summary = buildStudentModuleSummary(sessionRows.filter(r => r.courseName === course.name));
+    if (!summary.students.length) continue;
+    const isWellness = course.name === WELLNESS_COURSE;
+    const sheetName = `E - ${course.code || course.name}`.replace(/[\\/?*[\]:]/g, ' ').slice(0, 31);
+    const sheetE = workbook.addWorksheet(sheetName);
+    sheetE.columns = [
+      { header: 'Student Name', key: 'name', width: 24 },
+      { header: 'Roll Number', key: 'roll', width: 14 },
+      { header: 'Email', key: 'email', width: 28 },
+      { header: 'Department', key: 'dept', width: 22 },
+      { header: 'Programme', key: 'programme', width: 14 },
+      ...summary.modules.flatMap((m, i) => [
+        { header: `${m} — Batch`, key: `b${i}`, width: 18 },
+        { header: `${m} — ${isWellness ? 'Final Attendance' : 'Attendance'}`, key: `a${i}`, width: 18 },
+        ...(course.hasQuiz ? [{ header: `${m} — Score`, key: `s${i}`, width: 12 }] : []),
+      ]),
+      { header: 'Modules Present', key: 'present', width: 16 },
+      { header: 'Total Modules', key: 'held', width: 14 },
+      { header: 'Attendance %', key: 'pct', width: 14 },
+    ];
+    sheetE.getRow(1).font = { bold: true };
+    for (const s of summary.students) {
+      const row = {
+        name: s.name || '—', roll: s.rollNo || '—', email: s.email || '—',
+        dept: s.department || '—', programme: s.programme || '—',
+        present: s.presentCount, held: s.markedCount,
+        pct: s.markedCount ? `${Math.round((s.presentCount / s.markedCount) * 100)}%` : '—',
+      };
+      summary.modules.forEach((m, i) => {
+        const r = s.modules[m];
+        row[`b${i}`] = r ? r.batches.join(' → ') || '—' : '—';
+        row[`a${i}`] = r ? { PRESENT: 'Present', ABSENT: 'Absent', PENDING: 'Pending' }[r.final] : '—';
+        if (course.hasQuiz) row[`s${i}`] = r?.score != null ? `${r.score} / 10` : '—';
+      });
+      sheetE.addRow(row);
+    }
+  }
+
   return workbook.xlsx.writeBuffer();
+};
+
+// ─── One student, one line (admin rule, 2026-10-09) ───
+// Mirrors the frontend's analytics/filterUtils.ts (aggregateStudents,
+// computeWellnessGrade, computeModuleStatus) so the Master Excel summary and
+// the Student-Level view agree. A student with several sessions of one module
+// (original batch + a Buffer make-up) gets one result for it, from a single
+// chosen session: best result, then has a score, then sheet/check-in
+// evidence, then latest. Attendance % is module-wise: Present modules ÷
+// every module of the course, completed or pending.
+const WELLNESS_COURSE = "Wellness Workshop";
+const WELLNESS_PASS_SCORE = 4;
+
+const sessionIsOver = (row) => !row.endAt || new Date(row.endAt).getTime() <= Date.now();
+
+const wellnessFinal = (s, row) => {
+  const physical = s.physicalSheetStatus === "PRESENT";
+  const digital = s.checkInStatus === "CHECKED_IN_PENDING" || s.checkInStatus === "CHECKED_IN_VERIFIED";
+  const quizPass = s.quizScore != null && s.quizScore >= WELLNESS_PASS_SCORE;
+  if (physical && digital && quizPass) return "PRESENT";
+  if (!sessionIsOver(row)) return "PENDING";
+  if (physical && digital && s.quizScore == null && !row.quizScoresAvailable) return "PENDING";
+  return "ABSENT";
+};
+
+// Frontend computeModuleStatus, as a rank: Present 5, attended but failed /
+// unscored 4, Pending 2, Absent 1.
+const moduleStatusRank = (s, row) => {
+  if (!sessionIsOver(row) && (!row.courseHasQuiz || s.quizScore == null)) return 2;
+  if (s.attendanceStatus === "NOT_MARKED") return s.hasCheckedIn ? 2 : 1;
+  if (s.attendanceStatus !== "PRESENT") return 1;
+  if (!row.courseHasQuiz) return 5;
+  if (s.quizScore == null) return row.quizScoresAvailable ? 4 : 2;
+  return s.quizScore >= 4 ? 5 : 4;
+};
+
+const moduleFinal = (s, row) => {
+  if (row.courseName === WELLNESS_COURSE) return wellnessFinal(s, row);
+  if (!sessionIsOver(row)) return "PENDING";
+  if (s.attendanceStatus === "NOT_MARKED") return s.hasCheckedIn ? "PENDING" : "ABSENT";
+  return s.attendanceStatus === "PRESENT" ? "PRESENT" : "ABSENT";
+};
+
+const sessionRank = ({ s, row }) => [
+  row.courseName === WELLNESS_COURSE ? { PRESENT: 3, PENDING: 2, ABSENT: 1 }[wellnessFinal(s, row)] : moduleStatusRank(s, row),
+  s.quizScore != null || s.score != null ? 1 : 0,
+  (s.physicalSheetStatus === "PRESENT" ? 1 : 0) + (s.hasCheckedIn ? 1 : 0),
+  new Date(row.date).getTime(),
+];
+
+const pickSession = (sessions) => sessions.reduce((best, cur) => {
+  const a = sessionRank(cur);
+  const b = sessionRank(best);
+  for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return a[i] > b[i] ? cur : best;
+  return best;
+});
+
+export const buildStudentModuleSummary = (rows) => {
+  const byStudent = new Map();
+  for (const row of rows) {
+    for (const s of row.students) {
+      const roll = s.rollNo && s.rollNo !== "—" ? s.rollNo.toUpperCase() : "";
+      const key = s.userId || (roll ? `pending:${roll}` : `pending:${s.email}`);
+      if (!byStudent.has(key)) byStudent.set(key, { info: s, modules: new Map() });
+      const moduleKey = row.moduleName && row.moduleName !== "—" ? row.moduleName : `event:${row.id}`;
+      const mods = byStudent.get(key).modules;
+      if (!mods.has(moduleKey)) mods.set(moduleKey, []);
+      mods.get(moduleKey).push({ s, row });
+    }
+  }
+  const moduleNames = new Set(rows.map(r => r.moduleName).filter(m => m && m !== "—"));
+  const students = [...byStudent.values()].map(({ info, modules }) => {
+    const out = {
+      name: info.name, rollNo: info.rollNo, email: info.email,
+      department: info.department, programme: info.programme,
+      // Denominator: every module of the course, completed or pending.
+      presentCount: 0, markedCount: moduleNames.size, modules: {},
+    };
+    for (const [moduleKey, sessions] of modules) {
+      const { s, row } = pickSession(sessions);
+      const final = moduleFinal(s, row);
+      if (final === "PRESENT") out.presentCount += 1;
+      if (moduleKey.startsWith("event:")) {
+        out.markedCount += 1;
+        continue;
+      }
+      out.modules[moduleKey] = {
+        final,
+        // The chosen session's score, else any other session's, so a quiz the
+        // student did take still shows.
+        score: s.quizScore ?? sessions.map(x => x.s.quizScore).find(q => q != null) ?? null,
+        batches: [...sessions]
+          .sort((a, b) => new Date(a.row.date).getTime() - new Date(b.row.date).getTime())
+          .map(x => x.row.batch || x.s.batch)
+          .filter(b => b && b !== "—"),
+      };
+    }
+    return out;
+  });
+  students.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  return { modules: [...moduleNames].sort(), students };
 };
 
 // DELETE EVENT
