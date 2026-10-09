@@ -8,6 +8,13 @@ const passwordRule = z
   .regex(/[a-z]/, "Must contain a lowercase letter")
   .regex(/[0-9]/, "Must contain a digit");
 
+// A phone number typed into the roll field (seen live: 8905554103) — no IITB
+// roll is 10+ digits long (the longest, e.g. 180010051, are 9).
+export const looksLikePhoneNumber = (v) => /^\+?\d{10,}$/.test(String(v).trim());
+
+// An IITB address whose local part is itself a roll number (24b0665@iitb.ac.in).
+const ROLL_STYLE_LOCAL_PART = /^(\d{2}[a-z]{1,2}\d{3,6}|\d{9})$/i;
+
 export const registerSchema = z.object({
   body: z.object({
     name: z.string().min(2).max(120),
@@ -24,7 +31,9 @@ export const registerSchema = z.object({
         // roll-number-keyed lookup elsewhere (batch-upload matching, admin
         // search) then fails to find them since the batch CSV has their real
         // roll number, not their email.
-        rollNumber: z.string().min(3).max(30).refine((v) => !v.includes("@"), "Roll number looks like an email address — enter your actual roll number"),
+        rollNumber: z.string().min(3).max(30)
+          .refine((v) => !v.includes("@"), "Roll number looks like an email address — enter your actual roll number")
+          .refine((v) => !looksLikePhoneNumber(v), "Roll number looks like a phone number — enter your actual roll number"),
         department: z.string().min(2).max(80),
         yearOfStudy: z.coerce.number().int().min(1).max(10),
         programme: z.enum(["BTECH", "BDES", "BS", "MTECH", "PHD", "MSC", "MA", "DUAL_DEGREE", "OTHER"]),
@@ -38,6 +47,22 @@ export const registerSchema = z.object({
         department: z.string().max(120).optional()
       })
       .optional()
+  }).superRefine((body, ctx) => {
+    // When the institute email is itself the roll number, the typed roll must
+    // be the same one. A mismatch (23b0412 for 23b0411@, a phone number for
+    // 24b0665@) leaves the account unmatched to its batch CSV and sheet rows,
+    // and the student then shows up twice in analytics.
+    const roll = body.studentProfile?.rollNumber;
+    if (!roll) return;
+    const [local, domain] = body.email.toLowerCase().split("@");
+    if (domain !== "iitb.ac.in" || !ROLL_STYLE_LOCAL_PART.test(local)) return;
+    if (roll.replace(/\s+/g, "").toLowerCase() !== local) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["studentProfile", "rollNumber"],
+        message: `Roll number must match your institute email (${local.toUpperCase()})`
+      });
+    }
   }),
   params: z.object({}).optional(),
   query: z.object({}).optional()

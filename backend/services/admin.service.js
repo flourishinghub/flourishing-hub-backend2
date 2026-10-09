@@ -834,6 +834,26 @@ export const getWorkshopAnalyticsTable = async () => {
         select: { courseModuleId: true, batchCode: true, rollNumber: true, name: true, email: true }
       })
     : [];
+  // A no-account row (sheet signer or CSV absentee) can still belong to a real
+  // account when its isMatched flag went stale: the account's profile roll is
+  // wrong (a phone number, an off-by-one digit), or the row was written after
+  // signup, when auto-matching no longer runs. Such a row used to show as a
+  // second, separate student. Looked up here by institute email and roll so
+  // the row below is either dropped (the account is already on this event's
+  // roster) or attributed to that account (one line per student).
+  const activeProfiles = await prisma.studentProfile.findMany({
+    where: { user: { isActive: true } },
+    select: { userId: true, rollNumber: true, department: true, programme: true, user: { select: { name: true, email: true } } }
+  });
+  const accountByRoll = new Map();
+  const accountByEmail = new Map();
+  for (const p of activeProfiles) {
+    if (p.rollNumber) accountByRoll.set(p.rollNumber.toUpperCase(), p);
+    accountByEmail.set(p.user.email.toLowerCase(), p);
+  }
+  const accountFor = (rollNumber, email) =>
+    (email && accountByEmail.get(email.toLowerCase())) || (rollNumber && accountByRoll.get(rollNumber.toUpperCase())) || null;
+
   const csvByModuleBatch = {};
   for (const r of csvRows) {
     const key = `${r.courseModuleId}::${r.batchCode.toUpperCase()}`;
@@ -949,17 +969,41 @@ export const getWorkshopAnalyticsTable = async () => {
       };
     });
 
+    // A no-account row whose email/roll is a real account (see accountFor):
+    // already on this event's roster -> not a second student; otherwise it is
+    // shown under that account, so both land on one line per student.
+    const registrantByUserId = new Map(students.map(s => [s.userId, s]));
+    const ownerOf = (rollNumber, email) => {
+      const acct = accountFor(rollNumber, email);
+      return acct ? { acct, registrant: registrantByUserId.get(acct.userId) || null } : null;
+    };
+    const asAccount = (owner) => owner
+      ? { userId: owner.acct.userId, name: owner.acct.user.name, email: owner.acct.user.email, rollNo: owner.acct.rollNumber || "—", department: owner.acct.department || null, programme: owner.acct.programme || null }
+      : null;
+
     // Pending (no-account-yet) signers, appended as synthetic student rows —
     // same shape/fields as a real registrant, minus anything that requires
     // an actual account (quiz/rating/registrationStatus).
-    const pendingStudents = (pendingByEvent[event.id] || []).map(p => ({
+    const pendingStudents = [];
+    for (const p of pendingByEvent[event.id] || []) {
+      const owner = ownerOf(p.rollNumber, p.email);
+      if (owner?.registrant) {
+        // The account is on this roster: the signature is its sheet
+        // attendance, not another student.
+        if (owner.registrant.attendanceStatus !== "PRESENT") owner.registrant.attendanceStatus = "PRESENT";
+        if (owner.registrant.physicalSheetStatus !== "PRESENT") owner.registrant.physicalSheetStatus = "PRESENT";
+        continue;
+      }
+      pendingStudents.push({
       userId: null,
       name: p.name || "—",
-      email: p.email || "—",
+      // Same IITB LDAP fallback as the CSV absentee rows below.
+      email: p.email || (p.rollNumber ? `${p.rollNumber.toLowerCase()}@iitb.ac.in` : "—"),
       rollNo: p.rollNumber || "—",
       batch: event.batch || "—",
       department: null,
       programme: null,
+      ...asAccount(owner),
       attendanceStatus: "PRESENT",
       hasCheckedIn: true,
       checkInStatus: "NOT_CHECKED_IN",
@@ -972,7 +1016,8 @@ export const getWorkshopAnalyticsTable = async () => {
       rating: null,
       registrationStatus: null,
       isPending: true
-    }));
+      });
+    }
     students.push(...pendingStudents);
 
     const csvAbsentKey = event.courseModuleId && event.batch
@@ -981,7 +1026,10 @@ export const getWorkshopAnalyticsTable = async () => {
     const alreadySignedRolls = pendingRollsByEvent[event.id] || new Set();
     const csvAbsentStudents = (csvByModuleBatch[csvAbsentKey] || [])
       .filter(r => !(r.rollNumber && alreadySignedRolls.has(r.rollNumber.toUpperCase())))
-      .map(r => ({
+      .map(r => ({ r, owner: ownerOf(r.rollNumber, r.email) }))
+      // Account already on this roster: its registration is the real row.
+      .filter(({ owner }) => !owner?.registrant)
+      .map(({ r, owner }) => ({
         userId: null,
         name: r.name || "—",
         // BatchAssignment.email is routinely null (mam's CSV upload usually
@@ -993,6 +1041,7 @@ export const getWorkshopAnalyticsTable = async () => {
         batch: event.batch || "—",
         department: null,
         programme: null,
+        ...asAccount(owner),
         attendanceStatus: "NOT_MARKED",
         hasCheckedIn: false,
         checkInStatus: "NOT_CHECKED_IN",
