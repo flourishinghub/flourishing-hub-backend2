@@ -851,6 +851,22 @@ export const getWorkshopAnalyticsTable = async () => {
     if (p.rollNumber) accountByRoll.set(p.rollNumber.toUpperCase(), p);
     accountByEmail.set(p.user.email.toLowerCase(), p);
   }
+  // Batch CSVs are sometimes uploaded with only roll + email, so a no-account
+  // row can have no name of its own while another CSV row or sheet row for the
+  // same roll does. Used as the name fallback below (MTC, 2026-10-12: 122
+  // students showed "—" as their name).
+  const namedRows = await prisma.$transaction([
+    prisma.batchAssignment.findMany({ where: { rollNumber: { not: null }, name: { not: null } }, select: { rollNumber: true, name: true }, orderBy: { updatedAt: "desc" } }),
+    prisma.pendingAttendance.findMany({ where: { rollNumber: { not: null }, name: { not: null } }, select: { rollNumber: true, name: true } }),
+  ]);
+  const nameByRoll = new Map();
+  for (const r of namedRows.flat()) {
+    const name = r.name.trim();
+    const key = r.rollNumber.toUpperCase();
+    if (name && name !== "—" && name.toLowerCase() !== "null" && !nameByRoll.has(key)) nameByRoll.set(key, name);
+  }
+  const nameFor = (rollNumber, name) =>
+    (name && name.trim()) || (rollNumber && nameByRoll.get(rollNumber.toUpperCase())) || "—";
   const accountFor = (rollNumber, email) =>
     (email && accountByEmail.get(email.toLowerCase())) || (rollNumber && accountByRoll.get(rollNumber.toUpperCase())) || null;
 
@@ -996,7 +1012,7 @@ export const getWorkshopAnalyticsTable = async () => {
       }
       pendingStudents.push({
       userId: null,
-      name: p.name || "—",
+      name: nameFor(p.rollNumber, p.name),
       // Same IITB LDAP fallback as the CSV absentee rows below.
       email: p.email || (p.rollNumber ? `${p.rollNumber.toLowerCase()}@iitb.ac.in` : "—"),
       rollNo: p.rollNumber || "—",
@@ -1031,7 +1047,7 @@ export const getWorkshopAnalyticsTable = async () => {
       .filter(({ owner }) => !owner?.registrant)
       .map(({ r, owner }) => ({
         userId: null,
-        name: r.name || "—",
+        name: nameFor(r.rollNumber, r.name),
         // BatchAssignment.email is routinely null (mam's CSV upload usually
         // only has roll+name) — fall back to the standard IITB LDAP address,
         // same convention already used when a PendingAttendance row is
