@@ -1,8 +1,10 @@
 // Wellness Workshop sessions are no longer tied to batches (2026-10-17).
 // Every session of a Wellness module — any batch's event or a buffer session
-// — is open to every Wellness student who is not yet Present in that module.
-// Once they are Present in one session of the module, the module's other
-// sessions disappear for them again (except ones they are registered in).
+// — is open to every Wellness student who hasn't completed that module yet
+// (completed = sheet Present + quiz >= 4 in one session; the check-in is not
+// considered, admin rule 2026-10-17). Once they have completed it in one
+// session of the module, its other sessions disappear for them again (except
+// ones they are registered in).
 // Other courses keep the batch-scoped rule.
 import { prisma } from "../database/prisma.js";
 
@@ -35,21 +37,46 @@ const isWellnessStudent = async (userId, courseId) => {
   return Boolean(reg || assignment);
 };
 
-// courseModuleIds a student has a Present attendance for (latest record per
-// event decides, so a Present later corrected to Absent doesn't count).
+const WELLNESS_PASS_SCORE = 4;
+const SCORE_MODULE_TITLE = "Quiz Score"; // quizScoreImport.service.js's uploaded-score module
+
+// courseModuleIds the student has completed: in ONE session, a sheet Present
+// (latest attendance record) + a quiz score >= 4. The check-in is left out
+// for now (admin rule 2026-10-17). A sheet Absent, a failing score, or a
+// score not uploaded yet keeps the module's sessions open.
 const getPresentModuleIds = async (userId, courseId) => {
-  const records = await prisma.attendanceRecord.findMany({
-    where: { userId, event: { courseId } },
-    select: { eventId: true, status: true, event: { select: { courseModuleId: true } } },
-    orderBy: { markedAt: "asc" },
-  });
+  const profile = await prisma.studentProfile.findUnique({ where: { userId }, select: { id: true } });
+  const [records, scores] = await Promise.all([
+    prisma.attendanceRecord.findMany({
+      where: { userId, event: { courseId } },
+      select: { eventId: true, status: true },
+      orderBy: { markedAt: "asc" },
+    }),
+    profile
+      ? prisma.moduleProgress.findMany({
+          where: {
+            studentProfileId: profile.id,
+            marksObtained: { not: null },
+            module: { event: { courseId }, OR: [{ sourceQuizId: { not: null } }, { title: SCORE_MODULE_TITLE }] },
+          },
+          select: { marksObtained: true, module: { select: { eventId: true, sourceQuizId: true } } },
+        })
+      : [],
+  ]);
   const latest = new Map();
-  for (const r of records) latest.set(r.eventId, r);
-  const present = new Set();
-  for (const r of latest.values()) {
-    if (r.status === "PRESENT" && r.event.courseModuleId) present.add(r.event.courseModuleId);
+  for (const r of records) latest.set(r.eventId, r.status);
+  // In-built quiz wins over an uploaded score, as in the analytics.
+  const scoreByEvent = new Map();
+  for (const s of scores) {
+    const ev = s.module.eventId;
+    if (s.module.sourceQuizId != null || !scoreByEvent.has(ev)) scoreByEvent.set(ev, s.marksObtained);
   }
-  return present;
+  const ppEventIds = [...latest.entries()]
+    .filter(([ev, status]) => status === "PRESENT" && (scoreByEvent.get(ev) ?? -1) >= WELLNESS_PASS_SCORE)
+    .map(([ev]) => ev);
+  if (!ppEventIds.length) return new Set();
+  const events = await prisma.event.findMany({ where: { id: { in: ppEventIds } }, select: { courseModuleId: true } });
+  return new Set(events.map((e) => e.courseModuleId).filter(Boolean));
 };
 
 // Wellness modules whose every session this student may see and register for.

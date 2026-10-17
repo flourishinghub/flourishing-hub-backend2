@@ -38,13 +38,13 @@ export const registerForEvent = async ({ eventId, asVolunteer }, user) => {
   // StudentProfile.cohort, which can't tell two different courses' batches
   // apart for the same student.
   // Wellness has no batches any more: any session of a module is open to a
-  // Wellness student who isn't Present in that module yet, and closed once
-  // they are (see wellnessVisibility.service.js).
+  // Wellness student who hasn't completed (sheet Present + quiz >= 4) that
+  // module yet, and closed once they are (see wellnessVisibility.service.js).
   const isWellness = await isWellnessCourseId(event.course?.id);
   if (isWellness && user.role === "STUDENT" && event.courseModuleId) {
     const openModuleIds = await getOpenWellnessModuleIds(user);
     if (!openModuleIds.includes(event.courseModuleId)) {
-      throw new ApiError(StatusCodes.FORBIDDEN, "You are already marked Present for this workshop module — contact admin if you believe this is an error.");
+      throw new ApiError(StatusCodes.FORBIDDEN, "You have already completed this workshop module (Present with a passing quiz score) — contact admin if you believe this is an error.");
     }
   } else if (event.batch && event.registrationMode === "COMPULSORY" && user.role === "STUDENT" && event.course) {
     const belongsToBatch = await prisma.batchAssignment.findFirst({
