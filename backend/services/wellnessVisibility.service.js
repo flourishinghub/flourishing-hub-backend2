@@ -4,7 +4,8 @@
 // (completed = sheet Present + quiz >= 4 in one session; the check-in is not
 // considered, admin rule 2026-10-17). Once they have completed it in one
 // session of the module, its other sessions disappear for them again (except
-// ones they are registered in).
+// ones they are registered in). A student registered in a session that hasn't
+// ended sees only that session of the module until it's over.
 // Other courses keep the batch-scoped rule.
 import { prisma } from "../database/prisma.js";
 
@@ -79,17 +80,36 @@ const getPresentModuleIds = async (userId, courseId) => {
   return new Set(events.map((e) => e.courseModuleId).filter(Boolean));
 };
 
-// Wellness modules whose every session this student may see and register for.
+// courseModuleIds where the student already holds a seat in a session that
+// hasn't ended yet. That module stays closed to them (they see only the
+// session they're registered in), so nobody books two sessions of one
+// module — e.g. two halls in the same slot (17 Oct M4: 81 students did).
+// Once that session is over and the module isn't completed, it opens again.
+export const getBookedWellnessModuleIds = async (userId, courseId) => {
+  const regs = await prisma.eventRegistration.findMany({
+    where: {
+      userId,
+      status: { not: "CANCELLED" },
+      event: { courseId, courseModuleId: { not: null }, endAt: { gt: new Date() } },
+    },
+    select: { event: { select: { courseModuleId: true } } },
+  });
+  return new Set(regs.map((r) => r.event.courseModuleId));
+};
+
+// Wellness modules whose every session this student may see and register for:
+// not completed, and no seat held in a session that hasn't ended yet.
 // [] for a non-student or a non-Wellness student.
 export const getOpenWellnessModuleIds = async (user) => {
   if (user?.role !== "STUDENT") return [];
   const courseId = await getWellnessCourseId();
   if (!courseId || !(await isWellnessStudent(user.id, courseId))) return [];
-  const [modules, present] = await Promise.all([
+  const [modules, present, booked] = await Promise.all([
     prisma.courseModule.findMany({ where: { courseId }, select: { id: true } }),
     getPresentModuleIds(user.id, courseId),
+    getBookedWellnessModuleIds(user.id, courseId),
   ]);
-  return modules.map((m) => m.id).filter((id) => !present.has(id));
+  return modules.map((m) => m.id).filter((id) => !present.has(id) && !booked.has(id));
 };
 
 // Extra OR branch for a student's event-visibility filter, or null.

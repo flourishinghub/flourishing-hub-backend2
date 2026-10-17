@@ -5,7 +5,7 @@ import { ApiError } from "../utils/ApiError.js";
 import { sendRegistrationConfirmationEmail, sendCourseBundleEmail } from "./email.service.js";
 import { createNotification } from "./notification.service.js";
 import { recalcCourseEnrolledCount, cascadeBundleRegistrationForStudent } from "./course.service.js";
-import { getOpenWellnessModuleIds, isWellnessCourseId } from "./wellnessVisibility.service.js";
+import { getBookedWellnessModuleIds, getOpenWellnessModuleIds, isWellnessCourseId } from "./wellnessVisibility.service.js";
 
 // Statuses that no longer occupy a seat — cancelled/no-show registrations should
 // free up capacity rather than counting against it.
@@ -44,6 +44,10 @@ export const registerForEvent = async ({ eventId, asVolunteer }, user) => {
   if (isWellness && user.role === "STUDENT" && event.courseModuleId) {
     const openModuleIds = await getOpenWellnessModuleIds(user);
     if (!openModuleIds.includes(event.courseModuleId)) {
+      const booked = await getBookedWellnessModuleIds(user.id, event.course.id);
+      if (booked.has(event.courseModuleId)) {
+        throw new ApiError(StatusCodes.CONFLICT, "You are already registered in another session of this workshop module — attend that one.");
+      }
       throw new ApiError(StatusCodes.FORBIDDEN, "You have already completed this workshop module (Present with a passing quiz score) — contact admin if you believe this is an error.");
     }
   } else if (event.batch && event.registrationMode === "COMPULSORY" && user.role === "STUDENT" && event.course) {
