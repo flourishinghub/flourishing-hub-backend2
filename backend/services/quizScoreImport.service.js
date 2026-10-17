@@ -80,9 +80,21 @@ export const importTopicQuizScores = async ({ courseId, topic, fileBuffer, fileN
   const rows = await parseWorkbookRows(fileBuffer, { fileName });
   if (!rows.length) throw new ApiError(StatusCodes.BAD_REQUEST, "The uploaded sheet has no data rows");
 
-  // Every batch's event for this topic under this course.
-  const events = await prisma.event.findMany({
+  // Every batch's event for this topic under this course. A module's events
+  // don't always share one title (a later batch can be named "3. Sleep and
+  // digital wellbeing" while the rest say "3. Sleep, nutrition, and digital
+  // wellbeing"), so the title only finds the module; every event of that
+  // module is included.
+  const titled = await prisma.event.findMany({
     where: { courseId, title: topic },
+    select: { courseModuleId: true },
+  });
+  const courseModuleIds = [...new Set(titled.map((e) => e.courseModuleId).filter(Boolean))];
+  const events = await prisma.event.findMany({
+    where: {
+      courseId,
+      OR: [{ title: topic }, ...(courseModuleIds.length ? [{ courseModuleId: { in: courseModuleIds } }] : [])],
+    },
     select: { id: true, batch: true, startAt: true, endAt: true },
   });
   if (!events.length) {
@@ -91,14 +103,50 @@ export const importTopicQuizScores = async ({ courseId, topic, fileBuffer, fileN
   const eventIds = events.map((e) => e.id);
   const eventById = new Map(events.map((e) => [e.id, e]));
 
-  // Non-cancelled registrations across those events -> which event each student sat in.
-  const regs = await prisma.eventRegistration.findMany({
-    where: { eventId: { in: eventIds }, status: { not: "CANCELLED" } },
-    select: { eventId: true, userId: true },
-  });
+  // Which event each student sat in. A student can be registered in more than
+  // one batch of the topic (e.g. their own batch, missed, then a buffer
+  // session they attended), and the analytics grades each session on its own
+  // score, so the score must land on the session they were Present at.
+  // Ranking per registration: latest attendance PRESENT, then registration
+  // ATTENDED, then a VERIFIED check-in, then a PENDING one; ties keep the
+  // first registration found.
+  const [regs, attendance, checkIns] = await Promise.all([
+    prisma.eventRegistration.findMany({
+      where: { eventId: { in: eventIds }, status: { not: "CANCELLED" } },
+      select: { eventId: true, userId: true, status: true },
+    }),
+    prisma.attendanceRecord.findMany({
+      where: { eventId: { in: eventIds } },
+      select: { eventId: true, userId: true, status: true, markedAt: true },
+      orderBy: { markedAt: "asc" },
+    }),
+    prisma.eventCheckIn.findMany({
+      where: { eventId: { in: eventIds }, status: { in: ["VERIFIED", "PENDING"] } },
+      select: { eventId: true, userId: true, status: true },
+    }),
+  ]);
+  const pairKey = (eventId, userId) => `${eventId}|${userId}`;
+  const latestAttendance = new Map(); // ascending order -> last write is the latest
+  for (const a of attendance) latestAttendance.set(pairKey(a.eventId, a.userId), a.status);
+  const checkInRank = new Map();
+  for (const c of checkIns) {
+    const k = pairKey(c.eventId, c.userId);
+    checkInRank.set(k, Math.max(checkInRank.get(k) ?? 0, c.status === "VERIFIED" ? 2 : 1));
+  }
+  const presenceRank = (r) => {
+    const k = pairKey(r.eventId, r.userId);
+    return (
+      (latestAttendance.get(k) === "PRESENT" ? 8 : 0) + (r.status === "ATTENDED" ? 4 : 0) + (checkInRank.get(k) ?? 0)
+    );
+  };
   const eventByUserId = new Map();
+  const bestRank = new Map();
   for (const r of regs) {
-    if (!eventByUserId.has(r.userId)) eventByUserId.set(r.userId, r.eventId);
+    const rank = presenceRank(r);
+    if (!eventByUserId.has(r.userId) || rank > bestRank.get(r.userId)) {
+      eventByUserId.set(r.userId, r.eventId);
+      bestRank.set(r.userId, rank);
+    }
   }
 
   // Resolve/create the sentinel score-module per event, lazily.
@@ -228,6 +276,16 @@ export const importTopicQuizScores = async ({ courseId, topic, fileBuffer, fileN
       create: { studentProfileId: profile.id, moduleId, marksObtained: score, completedAt: new Date() },
       update: { marksObtained: score, completedAt: new Date() },
     });
+    // A score an earlier upload put on another batch of this topic (before the
+    // student's Present session was known) would leave two sessions scored.
+    const otherScoreModuleIds = [...scoreModuleCache.entries()]
+      .filter(([evId]) => evId !== eventId)
+      .map(([, modId]) => modId);
+    if (otherScoreModuleIds.length) {
+      await prisma.moduleProgress.deleteMany({
+        where: { studentProfileId: profile.id, moduleId: { in: otherScoreModuleIds } },
+      });
+    }
     if (existing) result.updated += 1;
     else result.created += 1;
   }
