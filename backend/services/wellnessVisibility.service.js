@@ -1,12 +1,14 @@
 // Wellness Workshop sessions are no longer tied to batches (2026-10-17).
-// Every session of a Wellness module — any batch's event or a buffer session
-// — is open to every Wellness student who hasn't completed that module yet
+// A session of a Wellness module, whether a batch's event or a buffer session,
+// is open to every Wellness student who hasn't completed that module
 // (completed = sheet Present + quiz >= 4 in one session; the check-in is not
-// considered, admin rule 2026-10-17). Once they have completed it in one
-// session of the module, its other sessions disappear for them again (except
-// ones they are registered in). A student registered in a session that hasn't
-// ended sees only that session of the module until it's over.
-// Other courses keep the batch-scoped rule.
+// considered, admin rule 2026-10-17), as long as the session hasn't ended.
+// Once a student registers in a session of a module, every other session of
+// that module (same slot or later) stays hidden until that session's result
+// is in: Present-and-passed closes the module, Absent or failed reopens it
+// for sessions starting after it. A session the student is registered in
+// always stays visible (the registrations rule). Other courses keep the
+// batch-scoped rule.
 import { prisma } from "../database/prisma.js";
 
 export const WELLNESS_COURSE_NAME = "Wellness Workshop";
@@ -40,17 +42,43 @@ const isWellnessStudent = async (userId, courseId) => {
 
 const WELLNESS_PASS_SCORE = 4;
 const SCORE_MODULE_TITLE = "Quiz Score"; // quizScoreImport.service.js's uploaded-score module
+const SCORE_MODULE_WHERE = { OR: [{ sourceQuizId: { not: null } }, { title: SCORE_MODULE_TITLE }] };
 
-// courseModuleIds the student has completed: in ONE session, a sheet Present
-// (latest attendance record) + a quiz score >= 4. The check-in is left out
-// for now (admin rule 2026-10-17). A sheet Absent, a failing score, or a
-// score not uploaded yet keeps the module's sessions open.
-const getPresentModuleIds = async (userId, courseId) => {
+// Everything the Wellness rules need about one student, or null for a
+// non-student / non-Wellness student.
+//   completed: courseModuleIds with a sheet Present + quiz >= 4 in one session
+//   awaiting:  courseModuleIds with a registered session whose result isn't in
+//   lastEnd:   per courseModuleId, the latest end of a registered session
+// A registered session's result is in when:
+//   - the student's latest attendance there is ABSENT, or
+//   - the sheet is in (someone is Present there) and they aren't, or
+//   - they're Present and the quiz scores are in (a score module exists).
+// Until then (session not held yet, sheet or quiz not uploaded) it's awaiting.
+const getWellnessState = async (user) => {
+  if (user?.role !== "STUDENT") return null;
+  const courseId = await getWellnessCourseId();
+  if (!courseId || !(await isWellnessStudent(user.id, courseId))) return null;
+  const userId = user.id;
+
   const profile = await prisma.studentProfile.findUnique({ where: { userId }, select: { id: true } });
-  const [records, scores] = await Promise.all([
+  const [modules, regs, records, scores] = await Promise.all([
+    prisma.courseModule.findMany({ where: { courseId }, select: { id: true } }),
+    prisma.eventRegistration.findMany({
+      where: { userId, status: { not: "CANCELLED" }, event: { courseId, courseModuleId: { not: null } } },
+      select: {
+        eventId: true,
+        event: {
+          select: {
+            courseModuleId: true,
+            endAt: true,
+            modules: { where: SCORE_MODULE_WHERE, select: { id: true }, take: 1 },
+          },
+        },
+      },
+    }),
     prisma.attendanceRecord.findMany({
       where: { userId, event: { courseId } },
-      select: { eventId: true, status: true },
+      select: { eventId: true, status: true, event: { select: { courseModuleId: true } } },
       orderBy: { markedAt: "asc" },
     }),
     profile
@@ -58,63 +86,97 @@ const getPresentModuleIds = async (userId, courseId) => {
           where: {
             studentProfileId: profile.id,
             marksObtained: { not: null },
-            module: { event: { courseId }, OR: [{ sourceQuizId: { not: null } }, { title: SCORE_MODULE_TITLE }] },
+            module: { event: { courseId }, ...SCORE_MODULE_WHERE },
           },
           select: { marksObtained: true, module: { select: { eventId: true, sourceQuizId: true } } },
         })
       : [],
   ]);
-  const latest = new Map();
-  for (const r of records) latest.set(r.eventId, r.status);
+
+  const latest = new Map(); // eventId -> latest attendance status
+  const moduleOfEvent = new Map();
+  for (const r of records) {
+    latest.set(r.eventId, r.status);
+    moduleOfEvent.set(r.eventId, r.event.courseModuleId);
+  }
   // In-built quiz wins over an uploaded score, as in the analytics.
   const scoreByEvent = new Map();
-  for (const s of scores) {
-    const ev = s.module.eventId;
-    if (s.module.sourceQuizId != null || !scoreByEvent.has(ev)) scoreByEvent.set(ev, s.marksObtained);
+  for (const sc of scores) {
+    const ev = sc.module.eventId;
+    if (sc.module.sourceQuizId != null || !scoreByEvent.has(ev)) scoreByEvent.set(ev, sc.marksObtained);
   }
-  const ppEventIds = [...latest.entries()]
-    .filter(([ev, status]) => status === "PRESENT" && (scoreByEvent.get(ev) ?? -1) >= WELLNESS_PASS_SCORE)
-    .map(([ev]) => ev);
-  if (!ppEventIds.length) return new Set();
-  const events = await prisma.event.findMany({ where: { id: { in: ppEventIds } }, select: { courseModuleId: true } });
-  return new Set(events.map((e) => e.courseModuleId).filter(Boolean));
+
+  const completed = new Set();
+  for (const [ev, status] of latest) {
+    const moduleId = moduleOfEvent.get(ev);
+    if (moduleId && status === "PRESENT" && (scoreByEvent.get(ev) ?? -1) >= WELLNESS_PASS_SCORE) completed.add(moduleId);
+  }
+
+  // Registered sessions whose sheet is in (anyone Present there, with or
+  // without an account).
+  const regEventIds = regs.map((r) => r.eventId);
+  const [sheetAccounts, sheetPending] = regEventIds.length
+    ? await Promise.all([
+        prisma.attendanceRecord.findMany({
+          where: { eventId: { in: regEventIds }, status: "PRESENT" },
+          select: { eventId: true },
+          distinct: ["eventId"],
+        }),
+        prisma.pendingAttendance.findMany({
+          where: { eventId: { in: regEventIds }, status: "PRESENT" },
+          select: { eventId: true },
+          distinct: ["eventId"],
+        }),
+      ])
+    : [[], []];
+  const sheetIn = new Set([...sheetAccounts, ...sheetPending].map((r) => r.eventId));
+
+  const awaiting = new Set();
+  const lastEnd = new Map();
+  for (const { eventId, event } of regs) {
+    const moduleId = event.courseModuleId;
+    const prev = lastEnd.get(moduleId);
+    if (!prev || event.endAt > prev) lastEnd.set(moduleId, event.endAt);
+    const status = latest.get(eventId);
+    const resultIn =
+      status === "ABSENT" ||
+      (status !== "PRESENT" && sheetIn.has(eventId)) ||
+      (status === "PRESENT" && event.modules.length > 0);
+    if (!resultIn) awaiting.add(moduleId);
+  }
+
+  return { courseId, moduleIds: modules.map((m) => m.id), completed, awaiting, lastEnd };
 };
 
-// courseModuleIds where the student already holds a seat in a session that
-// hasn't ended yet. That module stays closed to them (they see only the
-// session they're registered in), so nobody books two sessions of one
-// module — e.g. two halls in the same slot (17 Oct M4: 81 students did).
-// Once that session is over and the module isn't completed, it opens again.
-export const getBookedWellnessModuleIds = async (userId, courseId) => {
-  const regs = await prisma.eventRegistration.findMany({
-    where: {
-      userId,
-      status: { not: "CANCELLED" },
-      event: { courseId, courseModuleId: { not: null }, endAt: { gt: new Date() } },
-    },
-    select: { event: { select: { courseModuleId: true } } },
-  });
-  return new Set(regs.map((r) => r.event.courseModuleId));
+// Why a Wellness student may not register for a session, or null if they may:
+// "completed", "awaiting" (a registered session of the module has no result
+// yet), "closed" (session already ended, or starts before the end of one
+// they were registered in), "notWellness" (a non-Wellness student).
+export const getWellnessBlockReason = async (user, event) => {
+  const state = await getWellnessState(user);
+  if (!state) return "notWellness";
+  const moduleId = event.courseModuleId;
+  if (state.completed.has(moduleId)) return "completed";
+  if (state.awaiting.has(moduleId)) return "awaiting";
+  const end = state.lastEnd.get(moduleId);
+  if (event.endAt <= new Date()) return "closed";
+  if (end && event.startAt < end) return "closed";
+  return null;
 };
 
-// Wellness modules whose every session this student may see and register for:
-// not completed, and no seat held in a session that hasn't ended yet.
-// [] for a non-student or a non-Wellness student.
-export const getOpenWellnessModuleIds = async (user) => {
-  if (user?.role !== "STUDENT") return [];
-  const courseId = await getWellnessCourseId();
-  if (!courseId || !(await isWellnessStudent(user.id, courseId))) return [];
-  const [modules, present, booked] = await Promise.all([
-    prisma.courseModule.findMany({ where: { courseId }, select: { id: true } }),
-    getPresentModuleIds(user.id, courseId),
-    getBookedWellnessModuleIds(user.id, courseId),
-  ]);
-  return modules.map((m) => m.id).filter((id) => !present.has(id) && !booked.has(id));
-};
-
-// Extra OR branch for a student's event-visibility filter, or null.
+// Extra OR branch for a student's event-visibility filter, or null: every
+// not-yet-ended session of each module that is neither completed nor awaiting
+// a result, starting no earlier than the end of a session they were
+// registered in.
 export const getWellnessVisibilityCondition = async (user) => {
-  const moduleIds = await getOpenWellnessModuleIds(user);
-  if (!moduleIds.length) return null;
-  return { courseId: await getWellnessCourseId(), courseModuleId: { in: moduleIds } };
+  const state = await getWellnessState(user);
+  if (!state) return null;
+  const branches = state.moduleIds
+    .filter((id) => !state.completed.has(id) && !state.awaiting.has(id))
+    .map((id) => {
+      const end = state.lastEnd.get(id);
+      return { courseModuleId: id, ...(end ? { startAt: { gte: end } } : {}) };
+    });
+  if (!branches.length) return null;
+  return { courseId: state.courseId, endAt: { gt: new Date() }, OR: branches };
 };

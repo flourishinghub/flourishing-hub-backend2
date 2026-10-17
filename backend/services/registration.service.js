@@ -5,7 +5,7 @@ import { ApiError } from "../utils/ApiError.js";
 import { sendRegistrationConfirmationEmail, sendCourseBundleEmail } from "./email.service.js";
 import { createNotification } from "./notification.service.js";
 import { recalcCourseEnrolledCount, cascadeBundleRegistrationForStudent } from "./course.service.js";
-import { getBookedWellnessModuleIds, getOpenWellnessModuleIds, isWellnessCourseId } from "./wellnessVisibility.service.js";
+import { getWellnessBlockReason, isWellnessCourseId } from "./wellnessVisibility.service.js";
 
 // Statuses that no longer occupy a seat — cancelled/no-show registrations should
 // free up capacity rather than counting against it.
@@ -37,18 +37,24 @@ export const registerForEvent = async ({ eventId, asVolunteer }, user) => {
   // (course+batch scoped) rather than the single flattened
   // StudentProfile.cohort, which can't tell two different courses' batches
   // apart for the same student.
-  // Wellness has no batches any more: any session of a module is open to a
-  // Wellness student who hasn't completed (sheet Present + quiz >= 4) that
-  // module yet, and closed once they are (see wellnessVisibility.service.js).
+  // Wellness has no batches any more: an upcoming or live session of a module
+  // is open to a Wellness student who hasn't completed (sheet Present + quiz
+  // >= 4) that module and has no other session of it still awaiting a result
+  // (see wellnessVisibility.service.js).
   const isWellness = await isWellnessCourseId(event.course?.id);
   if (isWellness && user.role === "STUDENT" && event.courseModuleId) {
-    const openModuleIds = await getOpenWellnessModuleIds(user);
-    if (!openModuleIds.includes(event.courseModuleId)) {
-      const booked = await getBookedWellnessModuleIds(user.id, event.course.id);
-      if (booked.has(event.courseModuleId)) {
-        throw new ApiError(StatusCodes.CONFLICT, "You are already registered in another session of this workshop module — attend that one.");
-      }
+    const reason = await getWellnessBlockReason(user, event);
+    if (reason === "completed") {
       throw new ApiError(StatusCodes.FORBIDDEN, "You have already completed this workshop module (Present with a passing quiz score) — contact admin if you believe this is an error.");
+    }
+    if (reason === "awaiting") {
+      throw new ApiError(StatusCodes.CONFLICT, "You are already registered in another session of this workshop module — wait for that session's result before choosing another.");
+    }
+    if (reason === "notWellness") {
+      throw new ApiError(StatusCodes.FORBIDDEN, "This workshop is only for Wellness Workshop students — contact admin if you believe this is an error.");
+    }
+    if (reason === "closed") {
+      throw new ApiError(StatusCodes.BAD_REQUEST, "This session is no longer open for you — register for an upcoming session of this module.");
     }
   } else if (event.batch && event.registrationMode === "COMPULSORY" && user.role === "STUDENT" && event.course) {
     const belongsToBatch = await prisma.batchAssignment.findFirst({
