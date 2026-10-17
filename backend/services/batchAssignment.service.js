@@ -139,16 +139,28 @@ const findIntraFileDuplicateRows = (validRows) => {
 // of the student's free-text StudentProfile.cohort field, so a batch code
 // that happens to repeat across two different courses can never cross-
 // register a student into the wrong course's workshops.
-const registerUserForCourseBatchEvents = async (userId, courseId, batchCode) => {
+// eventsCache (optional): Map<lowercased batchCode, {id}[]> shared across a
+// whole bulk upload run. Without it, this function re-runs the identical
+// event.findMany for every single row that shares a batch — for a 200-row
+// upload spanning ~5 batches that's ~195 redundant round-trips to the DB for
+// a query whose result never changes within the run. Callers outside the
+// bulk-upload loop (e.g. autoAssignCohortOnSignup, a single student at a
+// time) just omit it and this falls back to querying directly, unchanged.
+const registerUserForCourseBatchEvents = async (userId, courseId, batchCode, eventsCache) => {
   if (!userId || !courseId || !batchCode) return;
-  const events = await prisma.event.findMany({
-    where: {
-      courseId,
-      batch: { equals: batchCode, mode: "insensitive" },
-      registrationMode: "COMPULSORY"
-    },
-    select: { id: true }
-  });
+  const cacheKey = batchCode.toLowerCase();
+  let events = eventsCache?.get(cacheKey);
+  if (events === undefined) {
+    events = await prisma.event.findMany({
+      where: {
+        courseId,
+        batch: { equals: batchCode, mode: "insensitive" },
+        registrationMode: "COMPULSORY"
+      },
+      select: { id: true }
+    });
+    eventsCache?.set(cacheKey, events);
+  }
   if (!events.length) return;
 
   const existingCount = await prisma.eventRegistration.count({
@@ -344,8 +356,9 @@ export const uploadBatchAssignment = async ({ fileBuffer, fileName, courseId, re
   // to 4 sequential DB round-trips per row.
   const emails = [...new Set(rowsToProcess.map((r) => r.email).filter(Boolean))];
   const rollNumbers = [...new Set(rowsToProcess.map((r) => r.rollNumber).filter(Boolean))];
+  const distinctBatchCodes = [...new Set(rowsToProcess.map((r) => r.batchCode).filter(Boolean))];
 
-  const [existingUsers, existingAssignments] = await Promise.all([
+  const [existingUsers, existingAssignments, compulsoryEvents] = await Promise.all([
     prisma.user.findMany({
       where: {
         OR: [
@@ -363,8 +376,27 @@ export const uploadBatchAssignment = async ({ fileBuffer, fileName, courseId, re
           ...rollNumbers.map((r) => ({ rollNumber: { equals: r, mode: "insensitive" } }))
         ]
       }
-    })
+    }),
+    // Feeds eventsCache below — see registerUserForCourseBatchEvents. One
+    // query for every distinct batch in the file instead of one per row.
+    distinctBatchCodes.length
+      ? prisma.event.findMany({
+          where: { courseId, batch: { in: distinctBatchCodes, mode: "insensitive" }, registrationMode: "COMPULSORY" },
+          select: { id: true, batch: true }
+        })
+      : []
   ]);
+
+  const eventsCache = new Map();
+  for (const batchCode of distinctBatchCodes) {
+    const key = batchCode.toLowerCase();
+    eventsCache.set(
+      key,
+      compulsoryEvents
+        .filter((e) => e.batch?.toLowerCase() === key)
+        .map((e) => ({ id: e.id }))
+    );
+  }
 
   const userByEmail = new Map(existingUsers.filter((u) => u.email).map((u) => [u.email.toLowerCase(), u]));
   const userByRollNumber = new Map(
@@ -474,7 +506,7 @@ export const uploadBatchAssignment = async ({ fileBuffer, fileName, courseId, re
         ]);
         savedAssignment = assignment;
         results.matched++;
-        await registerUserForCourseBatchEvents(existingUser.id, courseId, batchCode);
+        await registerUserForCourseBatchEvents(existingUser.id, courseId, batchCode, eventsCache);
 
         if (previousBatchCodes.length > 0) {
           await prisma.eventRegistration.updateMany({
