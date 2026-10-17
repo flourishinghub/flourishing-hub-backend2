@@ -14,6 +14,7 @@ import {
   updateAvailability
 } from "./operation.service.js";
 import { registerForEvent } from "./registration.service.js";
+import { getWellnessVisibilityCondition } from "./wellnessVisibility.service.js";
 
 const PROGRAMME_LABELS = {
   BTECH: "BTech",
@@ -303,6 +304,9 @@ const buildStudentLikeProfile = async (userId, explicitRole) => {
   // in event.service.js: without it, a student saw every batch's copy of a
   // course's workshops here (e.g. all 8 workshops of a 4-module x 2-batch
   // course) instead of just the ones for their own batch.
+  // Wellness: every session of a module the student isn't Present in yet
+  // (see wellnessVisibility.service.js).
+  const wellnessOpen = await getWellnessVisibilityCondition(user);
   const studentVisibilityFilter =
     user.role === "STUDENT"
       ? {
@@ -310,7 +314,8 @@ const buildStudentLikeProfile = async (userId, explicitRole) => {
             { batch: null },
             { courseId: null },
             { registrationMode: { not: "COMPULSORY" } },
-            { registrations: { some: { userId, status: { not: "CANCELLED" } } } }
+            { registrations: { some: { userId, status: { not: "CANCELLED" } } } },
+            ...(wellnessOpen ? [wellnessOpen] : [])
           ]
         }
       : {};
@@ -934,6 +939,9 @@ export const listFrontendEvents = async (user, explicitRole) => {
   // to every student instead of just their 4). listEvents() in
   // event.service.js already has this exact guard; this endpoint (the one
   // the actual student-facing app hits for its events list) never did.
+  // Wellness: every session of a module the student isn't Present in yet
+  // (see wellnessVisibility.service.js).
+  const wellnessOpen = await getWellnessVisibilityCondition(user);
   const studentVisibilityFilter =
     user.role === "STUDENT"
       ? {
@@ -941,7 +949,8 @@ export const listFrontendEvents = async (user, explicitRole) => {
             { batch: null },
             { courseId: null },
             { registrationMode: { not: "COMPULSORY" } },
-            { registrations: { some: { userId: user.id, status: { not: "CANCELLED" } } } }
+            { registrations: { some: { userId: user.id, status: { not: "CANCELLED" } } } },
+            ...(wellnessOpen ? [wellnessOpen] : [])
           ]
         }
       : {};

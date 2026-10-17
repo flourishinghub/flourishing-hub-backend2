@@ -3,6 +3,7 @@ import { ApiError } from "../utils/ApiError.js";
 import { StatusCodes } from "http-status-codes";
 import { sendCourseBundleEmail } from "./email.service.js";
 import { createNotificationsForUsers } from "./notification.service.js";
+import { isWellnessCourseId } from "./wellnessVisibility.service.js";
 
 // Sends the course-bundle confirmation email + in-app notification to each
 // given user for a compulsory course. Shared by every AUTO-registration path
@@ -68,6 +69,7 @@ export const cascadeBundleRegistrationForStudent = async (userId, eventId) => {
     select: { courseId: true, batch: true, course: { select: { isCompulsory: true } } }
   });
   if (!event?.courseId || !event.course?.isCompulsory) return;
+  if (await isWellnessCourseId(event.courseId)) return;
 
   const siblingEvents = await prisma.event.findMany({
     where: {
@@ -97,6 +99,9 @@ export const cascadeBundleRegistrationForNewEvent = async (eventId) => {
   // their registrants (and compounding further each time another batch-less
   // workshop got created).
   if (!event?.courseId || !event.course?.isCompulsory || !event.batch) return;
+  // Wellness sessions aren't batch-bound any more (wellnessVisibility.service.js),
+  // so a new session doesn't pull in another module's same-named batch.
+  if (await isWellnessCourseId(event.courseId)) return;
 
   const siblingRegistrations = await prisma.eventRegistration.findMany({
     where: {

@@ -10,6 +10,7 @@ import { cascadeBundleRegistrationForNewEvent } from "./course.service.js";
 import { normalizeBatch } from "../utils/normalizeBatch.js";
 import { sendStaffAssignmentEmail } from "./email.service.js";
 import { cleanStaffName } from "../utils/staffName.js";
+import { getWellnessVisibilityCondition } from "./wellnessVisibility.service.js";
 
 const parseRegistrationNotes = (notes) => {
   if (!notes) {
@@ -191,6 +192,10 @@ export const listEvents = async (query, user) => {
   // literal would let the second silently clobber the first.
   const andConditions = [];
 
+  // Wellness: every session of a module the student isn't Present in yet,
+  // whatever its batch (see wellnessVisibility.service.js).
+  const wellnessOpen = await getWellnessVisibilityCondition(user);
+
   // Batch filter: if batch param provided, show events with no batch OR matching batch.
   // Case-insensitive to match autoRegisterBatch's cohort comparison (import.service.js) —
   // otherwise a student auto-registered via a differently-cased batch code (e.g. admin
@@ -207,7 +212,8 @@ export const listEvents = async (query, user) => {
       OR: [
         { batch: null },
         ...(query.batch ? [{ batch: { equals: query.batch, mode: "insensitive" } }] : []),
-        ...(user?.role === "STUDENT" ? [{ registrations: { some: { userId: user.id, status: { not: "CANCELLED" } } } }] : [])
+        ...(user?.role === "STUDENT" ? [{ registrations: { some: { userId: user.id, status: { not: "CANCELLED" } } } }] : []),
+        ...(wellnessOpen ? [wellnessOpen] : [])
       ]
     });
   }
@@ -237,7 +243,8 @@ export const listEvents = async (query, user) => {
         { batch: null },
         { courseId: null },
         { registrationMode: { not: "COMPULSORY" } },
-        { registrations: { some: { userId: user.id, status: { not: "CANCELLED" } } } }
+        { registrations: { some: { userId: user.id, status: { not: "CANCELLED" } } } },
+        ...(wellnessOpen ? [wellnessOpen] : [])
       ]
     });
   }
