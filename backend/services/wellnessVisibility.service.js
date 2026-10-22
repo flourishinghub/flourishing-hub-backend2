@@ -1,8 +1,9 @@
 // Wellness Workshop sessions are no longer tied to batches (2026-10-17).
 // A session of a Wellness module, whether a batch's event or a buffer session,
 // is open to every Wellness student who hasn't completed that module
-// (completed = sheet Present + quiz >= 4 in one session; the check-in is not
-// considered, admin rule 2026-10-17), as long as the session hasn't ended.
+// (completed = sheet Present + app check-in + quiz >= 4 in one session, the
+// same PP rule as the analytics grade; admin rule 2026-10-22, before that the
+// check-in was ignored), as long as the session hasn't ended.
 // Once a student registers in a session of a module, every other session of
 // that module (same slot or later) stays hidden until that session's result
 // is in: Present-and-passed closes the module, Absent or failed reopens it
@@ -46,7 +47,7 @@ const SCORE_MODULE_WHERE = { OR: [{ sourceQuizId: { not: null } }, { title: SCOR
 
 // Everything the Wellness rules need about one student, or null for a
 // non-student / non-Wellness student.
-//   completed: courseModuleIds with a sheet Present + quiz >= 4 in one session
+//   completed: courseModuleIds with a sheet Present + check-in + quiz >= 4 in one session
 //   awaiting:  courseModuleIds with a registered session whose result isn't in
 //   lastEnd:   per courseModuleId, the latest end of a registered session
 // A registered session's result is in when:
@@ -61,7 +62,7 @@ const getWellnessState = async (user) => {
   const userId = user.id;
 
   const profile = await prisma.studentProfile.findUnique({ where: { userId }, select: { id: true } });
-  const [modules, regs, records, scores] = await Promise.all([
+  const [modules, regs, records, scores, checkIns] = await Promise.all([
     prisma.courseModule.findMany({ where: { courseId }, select: { id: true } }),
     prisma.eventRegistration.findMany({
       where: { userId, status: { not: "CANCELLED" }, event: { courseId, courseModuleId: { not: null } } },
@@ -91,7 +92,13 @@ const getWellnessState = async (user) => {
           select: { marksObtained: true, module: { select: { eventId: true, sourceQuizId: true } } },
         })
       : [],
+    // Digital attendance, as in the analytics grade: a pending or verified check-in.
+    prisma.eventCheckIn.findMany({
+      where: { userId, status: { in: ["PENDING", "VERIFIED"] }, event: { courseId } },
+      select: { eventId: true },
+    }),
   ]);
+  const checkedIn = new Set(checkIns.map((c) => c.eventId));
 
   const latest = new Map(); // eventId -> latest attendance status
   const moduleOfEvent = new Map();
@@ -109,7 +116,7 @@ const getWellnessState = async (user) => {
   const completed = new Set();
   for (const [ev, status] of latest) {
     const moduleId = moduleOfEvent.get(ev);
-    if (moduleId && status === "PRESENT" && (scoreByEvent.get(ev) ?? -1) >= WELLNESS_PASS_SCORE) completed.add(moduleId);
+    if (moduleId && status === "PRESENT" && checkedIn.has(ev) && (scoreByEvent.get(ev) ?? -1) >= WELLNESS_PASS_SCORE) completed.add(moduleId);
   }
 
   // Registered sessions whose sheet is in (anyone Present there, with or
