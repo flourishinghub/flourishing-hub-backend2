@@ -8,8 +8,11 @@
 // that module (same slot or later) stays hidden until that session's result
 // is in: Present-and-passed closes the module, Absent or failed reopens it
 // for sessions starting after it. A session the student is registered in
-// always stays visible (the registrations rule). Other courses keep the
-// batch-scoped rule.
+// always stays visible (the registrations rule). Buffer sessions are the
+// exception (admin rule 2026-10-22, "visible to all the absent students"):
+// a Buffer stays open to every student who hasn't completed the module, even
+// with a booking in another session of it, unless that booking is itself a
+// Buffer still awaiting its result. Other courses keep the batch-scoped rule.
 import { prisma } from "../database/prisma.js";
 
 export const WELLNESS_COURSE_NAME = "Wellness Workshop";
@@ -42,6 +45,7 @@ const isWellnessStudent = async (userId, courseId) => {
 };
 
 const WELLNESS_PASS_SCORE = 4;
+const isBufferBatch = (batch) => /^buffer/i.test(String(batch || "").trim());
 const SCORE_MODULE_TITLE = "Quiz Score"; // quizScoreImport.service.js's uploaded-score module
 const SCORE_MODULE_WHERE = { OR: [{ sourceQuizId: { not: null } }, { title: SCORE_MODULE_TITLE }] };
 
@@ -49,6 +53,7 @@ const SCORE_MODULE_WHERE = { OR: [{ sourceQuizId: { not: null } }, { title: SCOR
 // non-student / non-Wellness student.
 //   completed: courseModuleIds with a sheet Present + check-in + quiz >= 4 in one session
 //   awaiting:  courseModuleIds with a registered session whose result isn't in
+//   awaitingBuffer: the subset of those where that session is a Buffer
 //   lastEnd:   per courseModuleId, the latest end of a registered session
 // A registered session's result is in when:
 //   - the student's latest attendance there is ABSENT, or
@@ -71,6 +76,8 @@ const getWellnessState = async (user) => {
         event: {
           select: {
             courseModuleId: true,
+            batch: true,
+            startAt: true,
             endAt: true,
             modules: { where: SCORE_MODULE_WHERE, select: { id: true }, take: 1 },
           },
@@ -139,6 +146,8 @@ const getWellnessState = async (user) => {
   const sheetIn = new Set([...sheetAccounts, ...sheetPending].map((r) => r.eventId));
 
   const awaiting = new Set();
+  const awaitingBuffer = new Set();
+  const awaitingSlots = new Map(); // courseModuleId -> [{ startAt, endAt }] of sessions awaiting a result
   const lastEnd = new Map();
   for (const { eventId, event } of regs) {
     const moduleId = event.courseModuleId;
@@ -149,11 +158,23 @@ const getWellnessState = async (user) => {
       status === "ABSENT" ||
       (status !== "PRESENT" && sheetIn.has(eventId)) ||
       (status === "PRESENT" && event.modules.length > 0);
-    if (!resultIn) awaiting.add(moduleId);
+    if (!resultIn) {
+      awaiting.add(moduleId);
+      if (isBufferBatch(event.batch)) awaitingBuffer.add(moduleId);
+      if (!awaitingSlots.has(moduleId)) awaitingSlots.set(moduleId, []);
+      awaitingSlots.get(moduleId).push({ startAt: event.startAt, endAt: event.endAt });
+    }
   }
 
-  return { courseId, moduleIds: modules.map((m) => m.id), completed, awaiting, lastEnd };
+  return { courseId, moduleIds: modules.map((m) => m.id), completed, awaiting, awaitingBuffer, awaitingSlots, lastEnd };
 };
+
+// A Buffer is open despite a booking elsewhere in the module, but not while a
+// booked Buffer of the module awaits its result, nor at the same time as a
+// booked session that awaits its result.
+const bufferOpen = (state, moduleId, event) =>
+  !state.awaitingBuffer.has(moduleId) &&
+  !(state.awaitingSlots.get(moduleId) || []).some((s) => event.startAt < s.endAt && event.endAt > s.startAt);
 
 // Why a Wellness student may not register for a session, or null if they may:
 // "completed", "awaiting" (a registered session of the module has no result
@@ -164,9 +185,10 @@ export const getWellnessBlockReason = async (user, event) => {
   if (!state) return "notWellness";
   const moduleId = event.courseModuleId;
   if (state.completed.has(moduleId)) return "completed";
+  if (event.endAt <= new Date()) return "closed";
+  if (isBufferBatch(event.batch)) return bufferOpen(state, moduleId, event) ? null : "awaiting";
   if (state.awaiting.has(moduleId)) return "awaiting";
   const end = state.lastEnd.get(moduleId);
-  if (event.endAt <= new Date()) return "closed";
   if (end && event.startAt < end) return "closed";
   return null;
 };
@@ -174,16 +196,26 @@ export const getWellnessBlockReason = async (user, event) => {
 // Extra OR branch for a student's event-visibility filter, or null: every
 // not-yet-ended session of each module that is neither completed nor awaiting
 // a result, starting no earlier than the end of a session they were
-// registered in.
+// registered in; plus that module's Buffers whenever bufferOpen allows.
 export const getWellnessVisibilityCondition = async (user) => {
   const state = await getWellnessState(user);
   if (!state) return null;
-  const branches = state.moduleIds
-    .filter((id) => !state.completed.has(id) && !state.awaiting.has(id))
-    .map((id) => {
+  const branches = [];
+  for (const id of state.moduleIds) {
+    if (state.completed.has(id)) continue;
+    if (!state.awaiting.has(id)) {
       const end = state.lastEnd.get(id);
-      return { courseModuleId: id, ...(end ? { startAt: { gte: end } } : {}) };
-    });
+      branches.push({ courseModuleId: id, ...(end ? { startAt: { gte: end } } : {}) });
+    }
+    if (!state.awaitingBuffer.has(id)) {
+      const slots = state.awaitingSlots.get(id) || [];
+      branches.push({
+        courseModuleId: id,
+        batch: { startsWith: "Buffer", mode: "insensitive" },
+        ...(slots.length ? { NOT: slots.map((s) => ({ startAt: { lt: s.endAt }, endAt: { gt: s.startAt } })) } : {}),
+      });
+    }
+  }
   if (!branches.length) return null;
   return { courseId: state.courseId, endAt: { gt: new Date() }, OR: branches };
 };

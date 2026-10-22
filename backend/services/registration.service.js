@@ -38,9 +38,10 @@ export const registerForEvent = async ({ eventId, asVolunteer }, user) => {
   // StudentProfile.cohort, which can't tell two different courses' batches
   // apart for the same student.
   // Wellness has no batches any more: an upcoming or live session of a module
-  // is open to a Wellness student who hasn't completed (sheet Present + quiz
-  // >= 4) that module and has no other session of it still awaiting a result
-  // (see wellnessVisibility.service.js).
+  // is open to a Wellness student who hasn't completed (sheet Present +
+  // check-in + quiz >= 4) that module and has no other session of it still
+  // awaiting a result; a Buffer stays open despite such a booking unless it is
+  // a Buffer or the same time slot (see wellnessVisibility.service.js).
   const isWellness = await isWellnessCourseId(event.course?.id);
   if (isWellness && user.role === "STUDENT" && event.courseModuleId) {
     const reason = await getWellnessBlockReason(user, event);
