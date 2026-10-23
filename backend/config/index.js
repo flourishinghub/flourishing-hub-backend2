@@ -39,7 +39,19 @@ const envSchema = z.object({
   // permanently. Flip to "true" (Render dashboard env var, no redeploy of
   // code needed) during a known high-load window to get exact query text +
   // duration in the logs instead of only endpoint-level response time.
-  PRISMA_QUERY_LOGGING: z.enum(["true", "false"]).default("false")
+  PRISMA_QUERY_LOGGING: z.enum(["true", "false"]).default("false"),
+  // Live Wellness grades Google Sheet (cron/wellnessSheetSync.cron.js). The sync
+  // stays off until both the sheet's Apps Script web app URL and the secret
+  // shared with that script (scripts/wellness-sheet-webapp.gs) are set.
+  WELLNESS_SHEET_WEBAPP_URL: z.string().trim().optional(),
+  WELLNESS_SHEET_SECRET: z.string().trim().optional(),
+  WELLNESS_SHEET_CRON: z.string().default("15 * * * *"),
+  // Test accounts left out of the sheet, the same rows removed by hand from
+  // the CSVs sent to the course coordinator.
+  WELLNESS_SHEET_EXCLUDE_ROLLS: z
+    .string()
+    .default("0028,28B2020,23CS101")
+    .transform(splitCsv)
 });
 
 const parsedEnv = envSchema.parse(process.env);

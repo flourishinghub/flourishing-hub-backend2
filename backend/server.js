@@ -2,6 +2,7 @@ import { app } from "./app.js";
 import { env } from "./config/index.js";
 import { prisma } from "./database/prisma.js";
 import { startReminderCron } from "./cron/reminder.cron.js";
+import { startWellnessSheetCron } from "./cron/wellnessSheetSync.cron.js";
 
 let server;
 
@@ -47,6 +48,7 @@ const start = async () => {
     });
 
     startReminderCron();
+    startWellnessSheetCron();
 
     server.on("error", async (error) => {
       if (error.code === "EADDRINUSE") {
