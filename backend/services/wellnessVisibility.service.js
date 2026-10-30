@@ -17,7 +17,9 @@
 // a booking that hasn't started yet (e.g. a 28 Oct seat) only hides the
 // module's sessions from its own start onwards and the same slot, never an
 // earlier session; ~350 students with later bookings could not see that day's
-// sessions of the module. Other courses keep the batch-scoped rule.
+// sessions of the module. Since 2026-10-30 a session running at the same time
+// as one the student is registered in is always open to them (same-slot halls).
+// Other courses keep the batch-scoped rule.
 import { prisma } from "../database/prisma.js";
 
 export const WELLNESS_COURSE_NAME = "Wellness Workshop";
@@ -157,9 +159,12 @@ const getWellnessState = async (user) => {
   const awaitingFrom = new Map();
   const awaitingBuffer = new Map();
   const awaitingSlots = new Map(); // courseModuleId -> [{ startAt, endAt }] of sessions awaiting a result
+  const regSlots = new Map(); // courseModuleId -> [{ startAt, endAt }] of every registered session
   const lastEnd = new Map();
   for (const { eventId, event } of regs) {
     const moduleId = event.courseModuleId;
+    if (!regSlots.has(moduleId)) regSlots.set(moduleId, []);
+    regSlots.get(moduleId).push({ startAt: event.startAt, endAt: event.endAt });
     const started = event.startAt <= now;
     // A booking that hasn't started yet doesn't close the sessions before it.
     if (started) {
@@ -180,11 +185,15 @@ const getWellnessState = async (user) => {
     }
   }
 
-  return { courseId, moduleIds: modules.map((m) => m.id), completed, awaiting, awaitingFrom, awaitingBuffer, awaitingSlots, lastEnd };
+  return { courseId, moduleIds: modules.map((m) => m.id), completed, awaiting, awaitingFrom, awaitingBuffer, awaitingSlots, regSlots, lastEnd };
 };
 
-const overlapsAwaitingSlot = (state, moduleId, event) =>
-  (state.awaitingSlots.get(moduleId) || []).some((s) => event.startAt < s.endAt && event.endAt > s.startAt);
+const overlaps = (slots, event) => (slots || []).some((s) => event.startAt < s.endAt && event.endAt > s.startAt);
+const overlapsAwaitingSlot = (state, moduleId, event) => overlaps(state.awaitingSlots.get(moduleId), event);
+// Sessions running at the same time as one the student is registered in stay
+// open to them (admin rule 2026-10-30: on 30 Oct B26, B27 and Buffer 16 were all
+// M4 at 18:30 in different halls; a B26 booking must not hide the other two).
+const overlapsRegisteredSlot = (state, moduleId, event) => overlaps(state.regSlots.get(moduleId), event);
 
 // A Buffer is open despite a booking elsewhere in the module, but not from the
 // start of a booked Buffer of the module that awaits its result, nor at the
@@ -202,6 +211,7 @@ export const getWellnessBlockReason = async (user, event) => {
   const moduleId = event.courseModuleId;
   if (state.completed.has(moduleId)) return "completed";
   if (event.endAt <= new Date()) return "closed";
+  if (overlapsRegisteredSlot(state, moduleId, event)) return null;
   if (isBufferBatch(event.batch)) return bufferOpen(state, moduleId, event) ? null : "awaiting";
   if (state.awaiting.has(moduleId)) return "awaiting";
   if (state.awaitingFrom.get(moduleId) <= event.startAt || overlapsAwaitingSlot(state, moduleId, event)) return "awaiting";
@@ -238,6 +248,13 @@ export const getWellnessVisibilityCondition = async (user) => {
       ...(bufferFrom ? { startAt: { lt: bufferFrom } } : {}),
       ...notInSlots,
     });
+    const regSlots = state.regSlots.get(id) || [];
+    if (regSlots.length) {
+      branches.push({
+        courseModuleId: id,
+        OR: regSlots.map((s) => ({ startAt: { lt: s.endAt }, endAt: { gt: s.startAt } })),
+      });
+    }
   }
   if (!branches.length) return null;
   return { courseId: state.courseId, endAt: { gt: new Date() }, OR: branches };
