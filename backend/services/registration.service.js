@@ -51,7 +51,7 @@ export const registerForEvent = async ({ eventId, asVolunteer }, user) => {
       throw new ApiError(StatusCodes.FORBIDDEN, "This workshop is only for Wellness Workshop students — contact admin if you believe this is an error.");
     }
     if (reason === "closed") {
-      throw new ApiError(StatusCodes.BAD_REQUEST, "This session has already ended — register for an upcoming session of this module.");
+      throw new ApiError(StatusCodes.BAD_REQUEST, "This session ended more than 45 minutes ago — register for an upcoming session of this module.");
     }
   } else if (event.batch && event.registrationMode === "COMPULSORY" && user.role === "STUDENT" && event.course) {
     const belongsToBatch = await prisma.batchAssignment.findFirst({

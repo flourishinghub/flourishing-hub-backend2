@@ -2,7 +2,7 @@
 // Every session of a Wellness module, whether a batch's event or a Buffer, is
 // open to every Wellness student who hasn't completed that module (completed =
 // sheet Present + app check-in + quiz >= 4 in one session, the same PP rule as
-// the analytics grade), as long as the session hasn't ended. Since 2026-10-31
+// the analytics grade), until 45 minutes after the session ends. Since 2026-10-31
 // (admin: "result aaye na aaye, sab open") nothing else matters: a booking in
 // another session of the module, or a past session whose sheet/quiz isn't
 // uploaded yet, no longer hides or blocks any session. (Before that a booked
@@ -41,6 +41,12 @@ const isWellnessStudent = async (userId, courseId) => {
 };
 
 const WELLNESS_PASS_SCORE = 4;
+// A session stays open for registration this long after it ends, the same
+// 45-minute grace the student event page keeps its Check-in button for
+// (frontend isEventLiveOrGrace). On 31 Oct students who sat a 9:30 Buffer
+// without registering found no way to register (and so check in) after 11:00.
+const REGISTRATION_GRACE_MS = 45 * 60 * 1000;
+const graceCutoff = () => new Date(Date.now() - REGISTRATION_GRACE_MS);
 const SCORE_MODULE_TITLE = "Quiz Score"; // quizScoreImport.service.js's uploaded-score module
 const SCORE_MODULE_WHERE = { OR: [{ sourceQuizId: { not: null } }, { title: SCORE_MODULE_TITLE }] };
 
@@ -102,21 +108,21 @@ const getWellnessState = async (user) => {
 };
 
 // Why a Wellness student may not register for a session, or null if they may:
-// "completed", "closed" (session already ended), "notWellness" (a non-Wellness student).
+// "completed", "closed" (session ended more than 45 min ago), "notWellness" (a non-Wellness student).
 export const getWellnessBlockReason = async (user, event) => {
   const state = await getWellnessState(user);
   if (!state) return "notWellness";
   if (state.completed.has(event.courseModuleId)) return "completed";
-  if (event.endAt <= new Date()) return "closed";
+  if (event.endAt <= graceCutoff()) return "closed";
   return null;
 };
 
 // Extra OR branch for a student's event-visibility filter, or null: every
-// not-yet-ended session of each module they haven't completed.
+// session of each module they haven't completed that hasn't ended, or ended within the last 45 min.
 export const getWellnessVisibilityCondition = async (user) => {
   const state = await getWellnessState(user);
   if (!state) return null;
   const open = state.moduleIds.filter((id) => !state.completed.has(id));
   if (!open.length) return null;
-  return { courseId: state.courseId, endAt: { gt: new Date() }, courseModuleId: { in: open } };
+  return { courseId: state.courseId, endAt: { gt: graceCutoff() }, courseModuleId: { in: open } };
 };
