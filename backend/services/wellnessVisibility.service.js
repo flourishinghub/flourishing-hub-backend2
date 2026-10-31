@@ -19,6 +19,10 @@
 // earlier session; ~350 students with later bookings could not see that day's
 // sessions of the module. Since 2026-10-30 a session running at the same time
 // as one the student is registered in is always open to them (same-slot halls).
+// Since 2026-10-31 (admin: "result aaye na aaye, Buffers sab open") a Buffer
+// never waits on any result: it is open to every Wellness student who hasn't
+// completed the module, whatever they have booked (e.g. a 9:30 Buffer 11
+// booking no longer hides that module's 11:30 Buffers).
 // Other courses keep the batch-scoped rule.
 import { prisma } from "../database/prisma.js";
 
@@ -61,7 +65,6 @@ const SCORE_MODULE_WHERE = { OR: [{ sourceQuizId: { not: null } }, { title: SCOR
 //   completed: courseModuleIds with a sheet Present + check-in + quiz >= 4 in one session
 //   awaiting:  courseModuleIds with a registered session that has started and whose result isn't in
 //   awaitingFrom: per courseModuleId, the earliest start of a booked session that hasn't started yet
-//   awaitingBuffer: per courseModuleId, the earliest start of a booked Buffer awaiting its result
 //   awaitingSlots: per courseModuleId, the times of every booked session awaiting its result
 //   lastEnd:   per courseModuleId, the latest end of a registered session that has started
 // A registered session's result is in when:
@@ -157,7 +160,6 @@ const getWellnessState = async (user) => {
   const now = new Date();
   const awaiting = new Set();
   const awaitingFrom = new Map();
-  const awaitingBuffer = new Map();
   const awaitingSlots = new Map(); // courseModuleId -> [{ startAt, endAt }] of sessions awaiting a result
   const regSlots = new Map(); // courseModuleId -> [{ startAt, endAt }] of every registered session
   const lastEnd = new Map();
@@ -179,13 +181,12 @@ const getWellnessState = async (user) => {
     if (!resultIn) {
       if (started) awaiting.add(moduleId);
       else if (!(awaitingFrom.get(moduleId) <= event.startAt)) awaitingFrom.set(moduleId, event.startAt);
-      if (isBufferBatch(event.batch) && !(awaitingBuffer.get(moduleId) <= event.startAt)) awaitingBuffer.set(moduleId, event.startAt);
       if (!awaitingSlots.has(moduleId)) awaitingSlots.set(moduleId, []);
       awaitingSlots.get(moduleId).push({ startAt: event.startAt, endAt: event.endAt });
     }
   }
 
-  return { courseId, moduleIds: modules.map((m) => m.id), completed, awaiting, awaitingFrom, awaitingBuffer, awaitingSlots, regSlots, lastEnd };
+  return { courseId, moduleIds: modules.map((m) => m.id), completed, awaiting, awaitingFrom, awaitingSlots, regSlots, lastEnd };
 };
 
 const overlaps = (slots, event) => (slots || []).some((s) => event.startAt < s.endAt && event.endAt > s.startAt);
@@ -194,12 +195,6 @@ const overlapsAwaitingSlot = (state, moduleId, event) => overlaps(state.awaiting
 // open to them (admin rule 2026-10-30: on 30 Oct B26, B27 and Buffer 16 were all
 // M4 at 18:30 in different halls; a B26 booking must not hide the other two).
 const overlapsRegisteredSlot = (state, moduleId, event) => overlaps(state.regSlots.get(moduleId), event);
-
-// A Buffer is open despite a booking elsewhere in the module, but not from the
-// start of a booked Buffer of the module that awaits its result, nor at the
-// same time as a booked session that awaits its result.
-const bufferOpen = (state, moduleId, event) =>
-  !(state.awaitingBuffer.get(moduleId) <= event.startAt) && !overlapsAwaitingSlot(state, moduleId, event);
 
 // Why a Wellness student may not register for a session, or null if they may:
 // "completed", "awaiting" (a registered session of the module has no result
@@ -212,7 +207,7 @@ export const getWellnessBlockReason = async (user, event) => {
   if (state.completed.has(moduleId)) return "completed";
   if (event.endAt <= new Date()) return "closed";
   if (overlapsRegisteredSlot(state, moduleId, event)) return null;
-  if (isBufferBatch(event.batch)) return bufferOpen(state, moduleId, event) ? null : "awaiting";
+  if (isBufferBatch(event.batch)) return null;
   if (state.awaiting.has(moduleId)) return "awaiting";
   if (state.awaitingFrom.get(moduleId) <= event.startAt || overlapsAwaitingSlot(state, moduleId, event)) return "awaiting";
   const end = state.lastEnd.get(moduleId);
@@ -223,7 +218,7 @@ export const getWellnessBlockReason = async (user, event) => {
 // Extra OR branch for a student's event-visibility filter, or null: every
 // not-yet-ended session of each module that is neither completed nor awaiting
 // a result, starting no earlier than the end of a session they were
-// registered in; plus that module's Buffers whenever bufferOpen allows.
+// registered in; plus every not-yet-ended Buffer of the module.
 export const getWellnessVisibilityCondition = async (user) => {
   const state = await getWellnessState(user);
   if (!state) return null;
@@ -241,13 +236,7 @@ export const getWellnessVisibilityCondition = async (user) => {
         ...notInSlots,
       });
     }
-    const bufferFrom = state.awaitingBuffer.get(id);
-    branches.push({
-      courseModuleId: id,
-      batch: { startsWith: "Buffer", mode: "insensitive" },
-      ...(bufferFrom ? { startAt: { lt: bufferFrom } } : {}),
-      ...notInSlots,
-    });
+    branches.push({ courseModuleId: id, batch: { startsWith: "Buffer", mode: "insensitive" } });
     const regSlots = state.regSlots.get(id) || [];
     if (regSlots.length) {
       branches.push({
