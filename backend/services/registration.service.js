@@ -38,24 +38,20 @@ export const registerForEvent = async ({ eventId, asVolunteer }, user) => {
   // StudentProfile.cohort, which can't tell two different courses' batches
   // apart for the same student.
   // Wellness has no batches any more: an upcoming or live session of a module
-  // is open to a Wellness student who hasn't completed (sheet Present +
-  // check-in + quiz >= 4) that module and has no other session of it still
-  // awaiting a result; a Buffer stays open despite such a booking unless it is
-  // a Buffer or the same time slot (see wellnessVisibility.service.js).
+  // is open to every Wellness student who hasn't completed (sheet Present +
+  // check-in + quiz >= 4) that module, whatever else they have booked
+  // (see wellnessVisibility.service.js).
   const isWellness = await isWellnessCourseId(event.course?.id);
   if (isWellness && user.role === "STUDENT" && event.courseModuleId) {
     const reason = await getWellnessBlockReason(user, event);
     if (reason === "completed") {
       throw new ApiError(StatusCodes.FORBIDDEN, "You have already completed this workshop module (Present with a passing quiz score) — contact admin if you believe this is an error.");
     }
-    if (reason === "awaiting") {
-      throw new ApiError(StatusCodes.CONFLICT, "You are already registered in another session of this workshop module — wait for that session's result before choosing another.");
-    }
     if (reason === "notWellness") {
       throw new ApiError(StatusCodes.FORBIDDEN, "This workshop is only for Wellness Workshop students — contact admin if you believe this is an error.");
     }
     if (reason === "closed") {
-      throw new ApiError(StatusCodes.BAD_REQUEST, "This session is no longer open for you — register for an upcoming session of this module.");
+      throw new ApiError(StatusCodes.BAD_REQUEST, "This session has already ended — register for an upcoming session of this module.");
     }
   } else if (event.batch && event.registrationMode === "COMPULSORY" && user.role === "STUDENT" && event.course) {
     const belongsToBatch = await prisma.batchAssignment.findFirst({

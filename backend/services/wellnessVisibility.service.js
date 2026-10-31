@@ -1,28 +1,13 @@
 // Wellness Workshop sessions are no longer tied to batches (2026-10-17).
-// A session of a Wellness module, whether a batch's event or a buffer session,
-// is open to every Wellness student who hasn't completed that module
-// (completed = sheet Present + app check-in + quiz >= 4 in one session, the
-// same PP rule as the analytics grade; admin rule 2026-10-22, before that the
-// check-in was ignored), as long as the session hasn't ended.
-// Once a student registers in a session of a module, every other session of
-// that module (same slot or later) stays hidden until that session's result
-// is in: Present-and-passed closes the module, Absent or failed reopens it
-// for sessions starting after it. A session the student is registered in
-// always stays visible (the registrations rule). Buffer sessions are the
-// exception (admin rule 2026-10-22, "visible to all the absent students"):
-// a Buffer stays open to every student who hasn't completed the module, even
-// with a booking in another session of it; a booked Buffer still awaiting its
-// result only hides the module's Buffers from its own start onwards, so an
-// earlier Buffer stays open. Since 2026-10-24 the same holds for every session:
-// a booking that hasn't started yet (e.g. a 28 Oct seat) only hides the
-// module's sessions from its own start onwards and the same slot, never an
-// earlier session; ~350 students with later bookings could not see that day's
-// sessions of the module. Since 2026-10-30 a session running at the same time
-// as one the student is registered in is always open to them (same-slot halls).
-// Since 2026-10-31 (admin: "result aaye na aaye, Buffers sab open") a Buffer
-// never waits on any result: it is open to every Wellness student who hasn't
-// completed the module, whatever they have booked (e.g. a 9:30 Buffer 11
-// booking no longer hides that module's 11:30 Buffers).
+// Every session of a Wellness module, whether a batch's event or a Buffer, is
+// open to every Wellness student who hasn't completed that module (completed =
+// sheet Present + app check-in + quiz >= 4 in one session, the same PP rule as
+// the analytics grade), as long as the session hasn't ended. Since 2026-10-31
+// (admin: "result aaye na aaye, sab open") nothing else matters: a booking in
+// another session of the module, or a past session whose sheet/quiz isn't
+// uploaded yet, no longer hides or blocks any session. (Before that a booked
+// session awaiting its result hid the module's other sessions; Buffers and
+// same-slot sessions had been exempted step by step on 22, 24 and 30 Oct.)
 // Other courses keep the batch-scoped rule.
 import { prisma } from "../database/prisma.js";
 
@@ -56,22 +41,12 @@ const isWellnessStudent = async (userId, courseId) => {
 };
 
 const WELLNESS_PASS_SCORE = 4;
-const isBufferBatch = (batch) => /^buffer/i.test(String(batch || "").trim());
 const SCORE_MODULE_TITLE = "Quiz Score"; // quizScoreImport.service.js's uploaded-score module
 const SCORE_MODULE_WHERE = { OR: [{ sourceQuizId: { not: null } }, { title: SCORE_MODULE_TITLE }] };
 
-// Everything the Wellness rules need about one student, or null for a
-// non-student / non-Wellness student.
+// The modules a Wellness student can still take, or null for a non-student /
+// non-Wellness student.
 //   completed: courseModuleIds with a sheet Present + check-in + quiz >= 4 in one session
-//   awaiting:  courseModuleIds with a registered session that has started and whose result isn't in
-//   awaitingFrom: per courseModuleId, the earliest start of a booked session that hasn't started yet
-//   awaitingSlots: per courseModuleId, the times of every booked session awaiting its result
-//   lastEnd:   per courseModuleId, the latest end of a registered session that has started
-// A registered session's result is in when:
-//   - the student's latest attendance there is ABSENT, or
-//   - the sheet is in (someone is Present there) and they aren't, or
-//   - they're Present and the quiz scores are in (a score module exists).
-// Until then (session not held yet, sheet or quiz not uploaded) it's awaiting.
 const getWellnessState = async (user) => {
   if (user?.role !== "STUDENT") return null;
   const courseId = await getWellnessCourseId();
@@ -79,23 +54,8 @@ const getWellnessState = async (user) => {
   const userId = user.id;
 
   const profile = await prisma.studentProfile.findUnique({ where: { userId }, select: { id: true } });
-  const [modules, regs, records, scores, checkIns] = await Promise.all([
+  const [modules, records, scores, checkIns] = await Promise.all([
     prisma.courseModule.findMany({ where: { courseId }, select: { id: true } }),
-    prisma.eventRegistration.findMany({
-      where: { userId, status: { not: "CANCELLED" }, event: { courseId, courseModuleId: { not: null } } },
-      select: {
-        eventId: true,
-        event: {
-          select: {
-            courseModuleId: true,
-            batch: true,
-            startAt: true,
-            endAt: true,
-            modules: { where: SCORE_MODULE_WHERE, select: { id: true }, take: 1 },
-          },
-        },
-      },
-    }),
     prisma.attendanceRecord.findMany({
       where: { userId, event: { courseId } },
       select: { eventId: true, status: true, event: { select: { courseModuleId: true } } },
@@ -138,113 +98,25 @@ const getWellnessState = async (user) => {
     if (moduleId && status === "PRESENT" && checkedIn.has(ev) && (scoreByEvent.get(ev) ?? -1) >= WELLNESS_PASS_SCORE) completed.add(moduleId);
   }
 
-  // Registered sessions whose sheet is in (anyone Present there, with or
-  // without an account).
-  const regEventIds = regs.map((r) => r.eventId);
-  const [sheetAccounts, sheetPending] = regEventIds.length
-    ? await Promise.all([
-        prisma.attendanceRecord.findMany({
-          where: { eventId: { in: regEventIds }, status: "PRESENT" },
-          select: { eventId: true },
-          distinct: ["eventId"],
-        }),
-        prisma.pendingAttendance.findMany({
-          where: { eventId: { in: regEventIds }, status: "PRESENT" },
-          select: { eventId: true },
-          distinct: ["eventId"],
-        }),
-      ])
-    : [[], []];
-  const sheetIn = new Set([...sheetAccounts, ...sheetPending].map((r) => r.eventId));
-
-  const now = new Date();
-  const awaiting = new Set();
-  const awaitingFrom = new Map();
-  const awaitingSlots = new Map(); // courseModuleId -> [{ startAt, endAt }] of sessions awaiting a result
-  const regSlots = new Map(); // courseModuleId -> [{ startAt, endAt }] of every registered session
-  const lastEnd = new Map();
-  for (const { eventId, event } of regs) {
-    const moduleId = event.courseModuleId;
-    if (!regSlots.has(moduleId)) regSlots.set(moduleId, []);
-    regSlots.get(moduleId).push({ startAt: event.startAt, endAt: event.endAt });
-    const started = event.startAt <= now;
-    // A booking that hasn't started yet doesn't close the sessions before it.
-    if (started) {
-      const prev = lastEnd.get(moduleId);
-      if (!prev || event.endAt > prev) lastEnd.set(moduleId, event.endAt);
-    }
-    const status = latest.get(eventId);
-    const resultIn =
-      status === "ABSENT" ||
-      (status !== "PRESENT" && sheetIn.has(eventId)) ||
-      (status === "PRESENT" && event.modules.length > 0);
-    if (!resultIn) {
-      if (started) awaiting.add(moduleId);
-      else if (!(awaitingFrom.get(moduleId) <= event.startAt)) awaitingFrom.set(moduleId, event.startAt);
-      if (!awaitingSlots.has(moduleId)) awaitingSlots.set(moduleId, []);
-      awaitingSlots.get(moduleId).push({ startAt: event.startAt, endAt: event.endAt });
-    }
-  }
-
-  return { courseId, moduleIds: modules.map((m) => m.id), completed, awaiting, awaitingFrom, awaitingSlots, regSlots, lastEnd };
+  return { courseId, moduleIds: modules.map((m) => m.id), completed };
 };
 
-const overlaps = (slots, event) => (slots || []).some((s) => event.startAt < s.endAt && event.endAt > s.startAt);
-const overlapsAwaitingSlot = (state, moduleId, event) => overlaps(state.awaitingSlots.get(moduleId), event);
-// Sessions running at the same time as one the student is registered in stay
-// open to them (admin rule 2026-10-30: on 30 Oct B26, B27 and Buffer 16 were all
-// M4 at 18:30 in different halls; a B26 booking must not hide the other two).
-const overlapsRegisteredSlot = (state, moduleId, event) => overlaps(state.regSlots.get(moduleId), event);
-
 // Why a Wellness student may not register for a session, or null if they may:
-// "completed", "awaiting" (a registered session of the module has no result
-// yet), "closed" (session already ended, or starts before the end of one
-// they were registered in), "notWellness" (a non-Wellness student).
+// "completed", "closed" (session already ended), "notWellness" (a non-Wellness student).
 export const getWellnessBlockReason = async (user, event) => {
   const state = await getWellnessState(user);
   if (!state) return "notWellness";
-  const moduleId = event.courseModuleId;
-  if (state.completed.has(moduleId)) return "completed";
+  if (state.completed.has(event.courseModuleId)) return "completed";
   if (event.endAt <= new Date()) return "closed";
-  if (overlapsRegisteredSlot(state, moduleId, event)) return null;
-  if (isBufferBatch(event.batch)) return null;
-  if (state.awaiting.has(moduleId)) return "awaiting";
-  if (state.awaitingFrom.get(moduleId) <= event.startAt || overlapsAwaitingSlot(state, moduleId, event)) return "awaiting";
-  const end = state.lastEnd.get(moduleId);
-  if (end && event.startAt < end) return "closed";
   return null;
 };
 
 // Extra OR branch for a student's event-visibility filter, or null: every
-// not-yet-ended session of each module that is neither completed nor awaiting
-// a result, starting no earlier than the end of a session they were
-// registered in; plus every not-yet-ended Buffer of the module.
+// not-yet-ended session of each module they haven't completed.
 export const getWellnessVisibilityCondition = async (user) => {
   const state = await getWellnessState(user);
   if (!state) return null;
-  const branches = [];
-  for (const id of state.moduleIds) {
-    if (state.completed.has(id)) continue;
-    const slots = state.awaitingSlots.get(id) || [];
-    const notInSlots = slots.length ? { NOT: slots.map((s) => ({ startAt: { lt: s.endAt }, endAt: { gt: s.startAt } })) } : {};
-    if (!state.awaiting.has(id)) {
-      const end = state.lastEnd.get(id);
-      const from = state.awaitingFrom.get(id);
-      branches.push({
-        courseModuleId: id,
-        ...(end || from ? { startAt: { ...(end ? { gte: end } : {}), ...(from ? { lt: from } : {}) } } : {}),
-        ...notInSlots,
-      });
-    }
-    branches.push({ courseModuleId: id, batch: { startsWith: "Buffer", mode: "insensitive" } });
-    const regSlots = state.regSlots.get(id) || [];
-    if (regSlots.length) {
-      branches.push({
-        courseModuleId: id,
-        OR: regSlots.map((s) => ({ startAt: { lt: s.endAt }, endAt: { gt: s.startAt } })),
-      });
-    }
-  }
-  if (!branches.length) return null;
-  return { courseId: state.courseId, endAt: { gt: new Date() }, OR: branches };
+  const open = state.moduleIds.filter((id) => !state.completed.has(id));
+  if (!open.length) return null;
+  return { courseId: state.courseId, endAt: { gt: new Date() }, courseModuleId: { in: open } };
 };
