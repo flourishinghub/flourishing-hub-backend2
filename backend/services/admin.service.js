@@ -1551,7 +1551,15 @@ const sessionIsOver = (row) => !row.endAt || new Date(row.endAt).getTime() <= Da
 // (no quiz). A REJECTED check-in doesn't count; an already-recorded Present
 // stays Present. Pending only while the session hasn't ended.
 const isMtcCourse = (courseName) => Boolean(courseName?.startsWith("Mentor Training Course"));
+// Admin rule, 2026-11-13: from the 3 Oct 2026 sessions on, only the physical
+// sheet decides MTC Final (check-in is still reported, but doesn't count).
+// Keep in sync with the frontend filterUtils.ts computeMtcFinal.
+const MTC_SHEET_ONLY_FROM = new Date("2026-10-03T00:00:00+05:30").getTime();
 const mtcFinal = (s, row) => {
+  if (new Date(row.date).getTime() >= MTC_SHEET_ONLY_FROM) {
+    if (s.physicalSheetStatus === "PRESENT") return "PRESENT";
+    return sessionIsOver(row) ? "ABSENT" : "PENDING";
+  }
   const digital = s.checkInStatus === "CHECKED_IN_PENDING" || s.checkInStatus === "CHECKED_IN_VERIFIED";
   if (s.attendanceStatus === "PRESENT" || s.physicalSheetStatus === "PRESENT" || digital) return "PRESENT";
   return sessionIsOver(row) ? "ABSENT" : "PENDING";
