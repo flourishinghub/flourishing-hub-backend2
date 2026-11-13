@@ -1485,8 +1485,8 @@ export const generateExcelExport = async () => {
     const summary = buildStudentModuleSummary(sessionRows.filter(r => r.courseName === course.name));
     if (!summary.students.length) continue;
     const isWellness = course.name === WELLNESS_COURSE;
-    // Wellness and MTC run physical sheets: show Digital + Physical next to Final.
-    const showEvidence = isWellness || isMtcCourse(course.name);
+    // Wellness, MTC and PFA run physical sheets: show Digital + Physical next to Final.
+    const showEvidence = isWellness || isSheetFinalCourse(course.name);
     const sheetName = `E - ${course.code || course.name}`.replace(/[\\/?*[\]:]/g, ' ').slice(0, 31);
     const sheetE = workbook.addWorksheet(sheetName);
     sheetE.columns = [
@@ -1555,8 +1555,12 @@ const isMtcCourse = (courseName) => Boolean(courseName?.startsWith("Mentor Train
 // sheet decides MTC Final (check-in is still reported, but doesn't count).
 // Keep in sync with the frontend filterUtils.ts computeMtcFinal.
 const MTC_SHEET_ONLY_FROM = new Date("2026-10-03T00:00:00+05:30").getTime();
+// Psychological First Aid (admin rule, 2026-11-13): every session, sheet only,
+// same columns as MTC. isSheetFinalCourse = the courses that use mtcFinal.
+const isPfaCourse = (courseName) => courseName === "Psychological First Aid";
+const isSheetFinalCourse = (courseName) => isMtcCourse(courseName) || isPfaCourse(courseName);
 const mtcFinal = (s, row) => {
-  if (new Date(row.date).getTime() >= MTC_SHEET_ONLY_FROM) {
+  if (isPfaCourse(row.courseName) || new Date(row.date).getTime() >= MTC_SHEET_ONLY_FROM) {
     if (s.physicalSheetStatus === "PRESENT") return "PRESENT";
     return sessionIsOver(row) ? "ABSENT" : "PENDING";
   }
@@ -1588,14 +1592,14 @@ const moduleStatusRank = (s, row) => {
 
 const moduleFinal = (s, row) => {
   if (row.courseName === WELLNESS_COURSE) return wellnessFinal(s, row);
-  if (isMtcCourse(row.courseName)) return mtcFinal(s, row);
+  if (isSheetFinalCourse(row.courseName)) return mtcFinal(s, row);
   if (!sessionIsOver(row)) return "PENDING";
   if (s.attendanceStatus === "NOT_MARKED") return s.hasCheckedIn ? "PENDING" : "ABSENT";
   return s.attendanceStatus === "PRESENT" ? "PRESENT" : "ABSENT";
 };
 
 const sessionRank = ({ s, row }) => [
-  row.courseName === WELLNESS_COURSE || isMtcCourse(row.courseName)
+  row.courseName === WELLNESS_COURSE || isSheetFinalCourse(row.courseName)
     ? { PRESENT: 3, PENDING: 2, ABSENT: 1 }[moduleFinal(s, row)]
     : moduleStatusRank(s, row),
   s.quizScore != null || s.score != null ? 1 : 0,
