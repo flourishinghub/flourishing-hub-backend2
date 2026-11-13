@@ -1485,7 +1485,7 @@ export const generateExcelExport = async () => {
     const summary = buildStudentModuleSummary(sessionRows.filter(r => r.courseName === course.name));
     if (!summary.students.length) continue;
     const isWellness = course.name === WELLNESS_COURSE;
-    // Wellness, MTC and PFA run physical sheets: show Digital + Physical next to Final.
+    // Wellness, MTC, PFA and Stress Management run physical sheets: show Digital + Physical next to Final.
     const showEvidence = isWellness || isSheetFinalCourse(course.name);
     const sheetName = `E - ${course.code || course.name}`.replace(/[\\/?*[\]:]/g, ' ').slice(0, 31);
     const sheetE = workbook.addWorksheet(sheetName);
@@ -1555,9 +1555,10 @@ const isMtcCourse = (courseName) => Boolean(courseName?.startsWith("Mentor Train
 // sheet decides MTC Final (check-in is still reported, but doesn't count).
 // Keep in sync with the frontend filterUtils.ts computeMtcFinal.
 const MTC_SHEET_ONLY_FROM = new Date("2026-10-03T00:00:00+05:30").getTime();
-// Psychological First Aid (admin rule, 2026-11-13): every session, sheet only,
-// same columns as MTC. isSheetFinalCourse = the courses that use mtcFinal.
-const isPfaCourse = (courseName) => courseName === "Psychological First Aid";
+// Psychological First Aid and Stress Management (admin rule, 2026-11-13): every
+// session, sheet only, same columns as MTC. isSheetFinalCourse = the courses that use mtcFinal.
+const SHEET_ONLY_COURSES = ["Psychological First Aid", "Stress Management"];
+const isPfaCourse = (courseName) => SHEET_ONLY_COURSES.includes(courseName);
 const isSheetFinalCourse = (courseName) => isMtcCourse(courseName) || isPfaCourse(courseName);
 const mtcFinal = (s, row) => {
   if (isPfaCourse(row.courseName) || new Date(row.date).getTime() >= MTC_SHEET_ONLY_FROM) {
