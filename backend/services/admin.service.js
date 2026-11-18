@@ -1561,7 +1561,7 @@ const SHEET_ONLY_COURSES = [
   "Psychological First Aid", "Stress Management",
   // 18 Nov 2026: these courses also count only the physical-sheet signature (keep in sync with frontend filterUtils.ts).
   "Emotional Fitness", "Confident Communication for Researchers", "Confident Communication Course",
-  "Interview Psychology", "Crack that Interview",
+  "Interview Psychology", "Crack that Interview", "Career Readiness Courses",
 ];
 const isPfaCourse = (courseName) => SHEET_ONLY_COURSES.includes(courseName);
 const isSheetFinalCourse = (courseName) => isMtcCourse(courseName) || isPfaCourse(courseName);
