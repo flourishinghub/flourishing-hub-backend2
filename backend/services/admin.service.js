@@ -1557,7 +1557,12 @@ const isMtcCourse = (courseName) => Boolean(courseName?.startsWith("Mentor Train
 const MTC_SHEET_ONLY_FROM = new Date("2026-10-03T00:00:00+05:30").getTime();
 // Psychological First Aid and Stress Management (admin rule, 2026-11-13): every
 // session, sheet only, same columns as MTC. isSheetFinalCourse = the courses that use mtcFinal.
-const SHEET_ONLY_COURSES = ["Psychological First Aid", "Stress Management"];
+const SHEET_ONLY_COURSES = [
+  "Psychological First Aid", "Stress Management",
+  // 18 Nov 2026: these courses also count only the physical-sheet signature (keep in sync with frontend filterUtils.ts).
+  "Emotional Fitness", "Confident Communication for Researchers", "Confident Communication Course",
+  "Interview Psychology", "Crack that Interview",
+];
 const isPfaCourse = (courseName) => SHEET_ONLY_COURSES.includes(courseName);
 const isSheetFinalCourse = (courseName) => isMtcCourse(courseName) || isPfaCourse(courseName);
 const mtcFinal = (s, row) => {
