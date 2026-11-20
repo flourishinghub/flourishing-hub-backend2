@@ -13,6 +13,7 @@ import {
   getInstructorFeedback,
   getVolunteerCapacity,
 } from "../services/dashboard.service.js";
+import { getStudentWellnessResult } from "../services/studentWellnessResult.service.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 
@@ -126,3 +127,11 @@ export const volunteerCapacityController = asyncHandler(async (req, res) => {
 
 
 
+
+export const studentWellnessResultController = asyncHandler(async (req, res) => {
+  if (req.user.role !== "STUDENT") {
+    throw new ApiError(StatusCodes.FORBIDDEN, "Student role required");
+  }
+  const data = await getStudentWellnessResult(req.user.id);
+  res.status(StatusCodes.OK).json({ success: true, data });
+});

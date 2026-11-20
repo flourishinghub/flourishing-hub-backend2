@@ -10,6 +10,7 @@ import {
   studentBundleProgressController,
   instructorFeedbackController,
   volunteerCapacityController,
+  studentWellnessResultController,
 } from "../controllers/dashboard.controller.js";
 import { authenticate } from "../middleware/auth.js";
 import { cacheResponse } from "../middleware/cacheResponse.js";
@@ -29,6 +30,8 @@ dashboardRoutes.get("/admin/dashboard", authenticate, cacheResponse("admin-dashb
 // New feature endpoints
 // 4 parallel queries, hit on every dashboard mount — was uncached.
 dashboardRoutes.get("/student/bundle-progress", authenticate, cacheResponse("bundle-progress", 15), studentBundleProgressController);
+// The student's own Wellness PP/NP per module, with what is missing.
+dashboardRoutes.get("/student/wellness-result", authenticate, cacheResponse("wellness-result", 30), studentWellnessResultController);
 dashboardRoutes.get("/instructor/feedback", authenticate, instructorFeedbackController);
 dashboardRoutes.get("/volunteer/capacity", authenticate, volunteerCapacityController);
 

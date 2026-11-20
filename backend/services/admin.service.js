@@ -19,7 +19,7 @@ const INACTIVE_REGISTRATION_STATUSES = ["CANCELLED", "NO_SHOW", "WAITLISTED"];
 // "sign-in-sheet-import"). Matched by prefix, not exact equality, since the
 // descriptive ones always carry sheet-specific detail after the tag.
 const PHYSICAL_SHEET_SOURCE_PREFIXES = ["SHEET_RECONCILIATION", "PHYSICAL_SHEET"];
-const isPhysicalSheetSource = (source) => {
+export const isPhysicalSheetSource = (source) => {
   if (!source) return false;
   if (source === "sign-in-sheet-import") return true;
   return PHYSICAL_SHEET_SOURCE_PREFIXES.some((p) => source.startsWith(p));
@@ -1575,7 +1575,7 @@ const mtcFinal = (s, row) => {
   return sessionIsOver(row) ? "ABSENT" : "PENDING";
 };
 
-const wellnessFinal = (s, row) => {
+export const wellnessFinal = (s, row) => {
   const physical = s.physicalSheetStatus === "PRESENT";
   const digital = s.checkInStatus === "CHECKED_IN_PENDING" || s.checkInStatus === "CHECKED_IN_VERIFIED";
   const quizPass = s.quizScore != null && s.quizScore >= WELLNESS_PASS_SCORE;
@@ -1613,7 +1613,7 @@ const sessionRank = ({ s, row }) => [
   new Date(row.date).getTime(),
 ];
 
-const pickSession = (sessions) => sessions.reduce((best, cur) => {
+export const pickSession = (sessions) => sessions.reduce((best, cur) => {
   const a = sessionRank(cur);
   const b = sessionRank(best);
   for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return a[i] > b[i] ? cur : best;
