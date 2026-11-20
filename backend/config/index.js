@@ -51,7 +51,14 @@ const envSchema = z.object({
   WELLNESS_SHEET_EXCLUDE_ROLLS: z
     .string()
     .default("0028,28B2020,23CS101")
-    .transform(splitCsv)
+    .transform(splitCsv),
+  // Live attendance sheet for every other course, one tab per course
+  // (cron/coursesSheetSync.cron.js); same web app script, its own sheet + secret.
+  // Test accounts left out are WELLNESS_SHEET_EXCLUDE_ROLLS.
+  COURSES_SHEET_WEBAPP_URL: z.string().trim().optional(),
+  COURSES_SHEET_SECRET: z.string().trim().optional(),
+  // 20 past each hour (5 min after the Wellness sheet), so the two heavy syncs don't overlap.
+  COURSES_SHEET_CRON: z.string().default("20 * * * *")
 });
 
 const parsedEnv = envSchema.parse(process.env);
