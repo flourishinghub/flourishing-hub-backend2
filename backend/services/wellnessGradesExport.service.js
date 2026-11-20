@@ -30,11 +30,14 @@ const computeWellnessGrade = (student, row) => {
   return { physical, digital, quizScore, quizPass, final };
 };
 
-// Best session of a module: result, then has a score, then evidence, then latest.
+// Best session of a module: result, then evidence (sheet + check-in), then has a
+// score, then latest. Evidence comes before score so an NP module shows the
+// session the student actually attended, not a session that only holds a quiz
+// response (e.g. Yashas 26B2503 M2: score on B10, sheet + check-in on Buffer 31).
 const sessionRank = ({ student, row }) => [
   SESSION_RANK[computeWellnessGrade(student, row).final],
-  student.quizScore != null || student.score != null ? 1 : 0,
   (student.physicalSheetStatus === "PRESENT" ? 1 : 0) + (student.hasCheckedIn ? 1 : 0),
+  student.quizScore != null || student.score != null ? 1 : 0,
   new Date(row.date).getTime()
 ];
 
@@ -108,11 +111,15 @@ export const buildWellnessGradesTable = async ({ excludeRolls = [] } = {}) => {
         continue;
       }
       // Score fallback from another session of the same module.
+      // Score display only, the grade stays the chosen session's. quizFrom names
+      // the other session so the sheet does not read as a full PP row.
       if (g.quizScore == null) {
-        const other = sessions.map((x) => x.student.quizScore).find((q) => q != null);
-        if (other != null) {
-          g.quizScore = other;
-          g.quizPass = other >= PASS_MARK;
+        const other = sessions.find((x) => x.student.quizScore != null);
+        if (other) {
+          g.quizScore = other.student.quizScore;
+          g.quizPass = g.quizScore >= PASS_MARK;
+          const b = other.row.batch || other.student.batch;
+          g.quizFrom = b && b !== NOT_SET ? b : "another session";
         }
       }
       grades[moduleKey] = g;
@@ -141,7 +148,9 @@ export const buildWellnessGradesTable = async ({ excludeRolls = [] } = {}) => {
         g.physical ? "Present" : "Absent",
         g.digital ? "Present" : "Absent",
         g.quizScore != null ? String(g.quizScore) : NOT_SET,
-        g.quizScore != null ? (g.quizPass ? "PP" : "NP") : g.final === "PENDING" ? "Pending" : "NP",
+        g.quizScore != null
+          ? `${g.quizPass ? "PP" : "NP"}${g.quizFrom ? ` (quiz in ${g.quizFrom}, not the attended session)` : ""}`
+          : g.final === "PENDING" ? "Pending" : "NP",
         gradeLabel(g)
       );
     }
