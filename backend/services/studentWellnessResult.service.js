@@ -22,6 +22,22 @@ const EVENT_SELECT = {
   modules: { select: { id: true, title: true, sourceQuizId: true } },
 };
 
+// One session's own outcome: PP / NP (with what is missing) / PENDING / NOT_ATTENDED.
+const gradeSession = (s, row) => {
+  const physical = s.physicalSheetStatus === "PRESENT";
+  const digital = s.checkInStatus === "CHECKED_IN_PENDING" || s.checkInStatus === "CHECKED_IN_VERIFIED";
+  const final = wellnessFinal(s, row);
+  const result = final === "PRESENT" ? "PP" : final === "PENDING" ? "PENDING" : !physical && !digital ? "NOT_ATTENDED" : "NP";
+  const reasons = [];
+  if (result === "NP") {
+    if (!physical) reasons.push("NO_SHEET_SIGN");
+    if (!digital) reasons.push("NO_CHECK_IN");
+    if (s.quizScore == null) reasons.push("NO_QUIZ");
+    else if (s.quizScore < PASS_SCORE) reasons.push("QUIZ_LOW");
+  }
+  return { physical, digital, result, reasons };
+};
+
 export const getStudentWellnessResult = async (userId) => {
   // Every round trip to the pooled DB costs ~2 s, so independent reads go in parallel.
   const [course, user] = await Promise.all([
@@ -159,18 +175,25 @@ export const getStudentWellnessResult = async (userId) => {
     const upcoming = (upcomingByModule.get(title) || []).sort((a, b) => a.startAt - b.startAt);
     const base = { title, upcoming, sessions: sessions.length };
     if (!sessions.length) return { ...base, result: "NOT_ATTENDED", reasons: [] };
-    const { s, row } = pickSession(sessions);
-    const physical = s.physicalSheetStatus === "PRESENT";
-    const digital = s.checkInStatus === "CHECKED_IN_PENDING" || s.checkInStatus === "CHECKED_IN_VERIFIED";
-    const final = wellnessFinal(s, row);
-    const result = final === "PRESENT" ? "PP" : final === "PENDING" ? "PENDING" : !physical && !digital ? "NOT_ATTENDED" : "NP";
-    const reasons = [];
-    if (result === "NP") {
-      if (!physical) reasons.push("NO_SHEET_SIGN");
-      if (!digital) reasons.push("NO_CHECK_IN");
-      if (s.quizScore == null) reasons.push("NO_QUIZ");
-      else if (s.quizScore < PASS_SCORE) reasons.push("QUIZ_LOW");
+    let { s, row } = pickSession(sessions);
+    // The grade is the chosen session's (same as the admin view). When that is
+    // not PP or pending, show the session where the student actually turned up
+    // (most of sheet + check-in, then a quiz, then latest) so the card says
+    // what is missing there, not "not attended" for a session with only a
+    // stray quiz score.
+    if (wellnessFinal(s, row) === "ABSENT") {
+      const key = (x) => [
+        (x.s.physicalSheetStatus === "PRESENT" ? 1 : 0) + (x.s.checkInStatus === "CHECKED_IN_PENDING" || x.s.checkInStatus === "CHECKED_IN_VERIFIED" ? 1 : 0),
+        x.s.quizScore != null ? 1 : 0,
+        new Date(x.row.date).getTime(),
+      ];
+      ({ s, row } = sessions.reduce((best, cur) => {
+        const a = key(cur), b = key(best);
+        for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] > b[i] ? cur : best;
+        return best;
+      }));
     }
+    const { physical, digital, result, reasons } = gradeSession(s, row);
     return {
       ...base,
       result,
@@ -182,6 +205,22 @@ export const getStudentWellnessResult = async (userId) => {
     };
   });
 
+  // Every past session on its own, for the session list: what that session
+  // gave, and whether the module is already PP through another session.
+  const sessionResults = [];
+  for (const [title, sessions] of sessionsByModule) {
+    const moduleResult = modules.find((m) => m.title === title)?.result;
+    for (const { s, row } of sessions) {
+      const g = gradeSession(s, row);
+      sessionResults.push({
+        eventId: row.id, module: title, batch: row.batch, date: row.date,
+        result: g.result, reasons: g.reasons, physical: g.physical, digital: g.digital,
+        quizScore: s.quizScore ?? null, moduleResult,
+      });
+    }
+  }
+  sessionResults.sort((a, b) => new Date(a.date) - new Date(b.date));
+
   const passed = modules.filter((m) => m.result === "PP").length;
   return {
     courseName: WELLNESS_COURSE,
@@ -190,5 +229,6 @@ export const getStudentWellnessResult = async (userId) => {
     passedModules: passed,
     courseResult: passed === modules.length ? "PP" : modules.some((m) => m.result === "PENDING") ? "PENDING" : "NP",
     modules,
+    sessionResults,
   };
 };
