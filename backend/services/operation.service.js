@@ -621,7 +621,8 @@ export const getMyAttendance = async (userId) => {
       include: {
         event: {
           include: {
-            course: { select: { id: true, name: true } }
+            course: { select: { id: true, name: true } },
+            courseModule: { select: { title: true } }
           }
         }
       },
@@ -663,7 +664,14 @@ export const getMyAttendance = async (userId) => {
     const hasPendingCheckIn = pendingCheckIns.some((c) => c.eventId === reg.eventId);
 
     let status = "ABSENT";
-    if (attendance?.status === "PRESENT" || hasVerifiedCheckIn) {
+    if (reg.event.course?.name === "Wellness Workshop") {
+      // Wellness: the physical sheet is final, so the attendance record decides.
+      // A VERIFIED check-in alone used to show "Present" even when the record is
+      // ABSENT (checked in, did not sign), and students read that as attended.
+      // No record yet but a check-in = verification still in progress.
+      if (attendance) status = attendance.status;
+      else if (hasVerifiedCheckIn || hasPendingCheckIn) status = "PENDING";
+    } else if (attendance?.status === "PRESENT" || hasVerifiedCheckIn) {
       status = "PRESENT";
     } else if (attendance?.status === "EXCUSED") {
       status = "EXCUSED";
@@ -677,6 +685,7 @@ export const getMyAttendance = async (userId) => {
       eventId: reg.eventId,
       eventTitle: reg.event.title,
       courseName: reg.event.course?.name || null,
+      moduleTitle: reg.event.courseModule?.title || null,
       venue: reg.event.venue || null,
       date: reg.event.startAt,
       status,
