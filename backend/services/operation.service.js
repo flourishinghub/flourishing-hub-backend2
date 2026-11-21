@@ -3,6 +3,7 @@ import { StatusCodes } from "http-status-codes";
 import { prisma } from "../database/prisma.js";
 import { ApiError } from "../utils/ApiError.js";
 import { createNotification, createNotificationsForUsers } from "./notification.service.js";
+import { isPhysicalSheetSource } from "./admin.service.js";
 
 const getIstDateLabel = (value) =>
   new Date(value).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" });
@@ -686,6 +687,9 @@ export const getMyAttendance = async (userId) => {
       eventTitle: reg.event.title,
       courseName: reg.event.course?.name || null,
       moduleTitle: reg.event.courseModule?.title || null,
+      // PRESENT from the physical sheet (same test the grade uses). A few old
+      // Wellness records are PRESENT from an app check-in only; the page names that.
+      onSheet: attendance?.status === "PRESENT" && isPhysicalSheetSource(attendance.source),
       venue: reg.event.venue || null,
       date: reg.event.startAt,
       status,
